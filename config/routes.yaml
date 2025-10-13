@@ -1,0 +1,10 @@
+controllers:
+  resource:
+    path: ../src/Controller/
+    namespace: App\Controller
+  type: attribute
+login_check:
+  path: /login_check
+  methods: [POST]
+refresh_token:
+  path: /token/refresh

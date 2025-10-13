@@ -1,0 +1,25 @@
+framework:
+  messenger:
+    transports:
+      # main async queue (Doctrine transport)
+      async_doctrine:
+        dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+        retry_strategy:
+          # how many times to retry on the main queue before moving to "failed"
+          max_retries: 5
+          delay: 2000         # 2s base delay
+          multiplier: 2
+          max_delay: 60000    # cap at 60s
+
+      # failed queue (same table, different queue_name)
+      failed: 'doctrine://default?queue_name=failed'
+
+    # when a message exhausts retries on async_doctrine, it is sent here:
+    failure_transport: failed
+
+    # apply useful DB-connection middleware to the default bus
+    buses:
+      messenger.bus.default:
+        middleware:
+          - doctrine_ping_connection
+          - doctrine_close_connection

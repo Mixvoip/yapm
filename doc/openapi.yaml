@@ -1,0 +1,2711 @@
+openapi: 3.0.0
+info:
+  title: YAPM API
+  description: API for Yet Another Password Manager
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8000
+    description: API base URL
+
+tags:
+  - name: Authentication
+    description: Authentication related operations
+  - name: Audit Logs
+    description: Audit logs related operations
+  - name: Folders
+    description: Folder related operations
+  - name: Groups
+    description: Group related operations
+  - name: Passwords
+    description: Password related operations
+  - name: Share Processes
+    description: Share process related operations
+  - name: Users
+    description: User management
+  - name: Vaults
+    description: Vault related operations
+
+paths:
+  /audit-logs:
+    get:
+      tags:
+        - Audit Logs
+      summary: Get audit logs
+      description: Retrieve audit log entries with pagination
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/search'
+        - name: userId
+          in: query
+          required: false
+          description: Filter by user ID
+          schema:
+            type: string
+            format: uuid
+        - name: actionType
+          in: query
+          required: false
+          description: Filter by audit action
+          schema:
+            type: string
+            enum: [created, updated, deleted, accessed]
+        - name: startDate
+          in: query
+          required: false
+          description: Filter by start date/time
+          schema:
+            $ref: "#/components/schemas/DateTime"
+        - name: endDate
+          in: query
+          required: false
+          description: Filter by end date/time
+          schema:
+            $ref: "#/components/schemas/DateTime"
+      responses:
+        200:
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAuditLogListResponse'
+        400:
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+  /folders:
+    post:
+      tags:
+        - Folders
+      summary: Create a new folder
+      description: Create a new folder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFolderRequest'
+        description: If groups are omitted from the request body, the groups from the parent resource will be used.
+      responses:
+        201:
+          description: Folder created Successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FolderWithGroups'
+        400:
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /folders/{id}:
+    get:
+      tags:
+        - Folders
+      summary: Retrieve a folder
+      description: Retrieve a folder by its id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        200:
+          description: Folder response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FolderWithGroups'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Folder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      tags:
+        - Folders
+      summary: Patch a folder
+      description: Update given folder fields
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Folder name
+                  example: My Folder
+                externalId:
+                  type: string
+                  description: External folder id
+                  example: 123
+                  nullable: true
+      responses:
+        200:
+          description: Folder updated Successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FolderWithGroups'
+        400:
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: Folder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /folders/{id}/changelogs/{logId}:
+    get:
+      tags:
+        - Folders
+      summary: Retrieve a folder changelog
+      description: Retrieve a single folder changelog by its id or all changelogs for a folder
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - name: logId
+          in: path
+          required: false
+          schema:
+            $ref: '#/components/schemas/Id'
+      responses:
+        200:
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangelogSummarizedList'
+              examples:
+                changelogList:
+                  value:
+                    - id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                      type: updated
+                      fields: ["name", "updatedBy"]
+                      timestamp: 2025-04-30 12:00:00
+                changelog:
+                  value:
+                    id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                    actionType: updated
+                    userEmail: admin@example.com
+                    oldValues: { "email": "old@email.com" }
+                    newValues: { "email": "new@email.com" }
+                    createdAt: 2025-04-30 12:00:00
+        400:
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Password not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /folders/{id}/delete:
+    post:
+      tags:
+        - Folders
+      summary: Delete a folder
+      description: Delete a folder and all its content
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientEncryptedData"
+        description: >
+          The request body must contain the user's encrypted password data
+          used for authentication:
+          `encryptedData`, `clientPublicKey`, and `nonce`.
+      responses:
+        204:
+          description: Folder deleted Successfully
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: Folder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /folders/{id}/passwords:
+    get:
+      tags:
+        - Folders
+      summary: Retrieve all passwords for a folder
+      description: Retrieve all passwords for a folder by folder id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        200:
+          description: Passwords response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordWithGroupsList'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Folder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /folders/{id}/permissions:
+    patch:
+      tags:
+        - Folders
+      summary: Patch folder permissions
+      description: Update folder permissions
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchPermissionsWithPartial"
+      responses:
+        202:
+          description: Folder permissions update request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareProcessMinimised'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: Folder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /folders/{id}/structure:
+    get:
+      tags:
+        - Folders
+      summary: Retrieve a folder structure
+      description: Retrieve the folder and password structure for a folder by folder id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        200:
+          description: Folder structure response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  folder:
+                    $ref: '#/components/schemas/FolderStructure'
+                  folders:
+                    type: array
+                    items:
+                      - $ref: '#/components/schemas/FolderStructure'
+                  passwords:
+                    type: array
+                    items:
+                      - $ref: '#/components/schemas/PasswordMinimised'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Folder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /groups:
+    get:
+      tags:
+        - Groups
+      summary: Group list
+      description: Returns a list of available groups
+      parameters:
+        - $ref: '#/components/parameters/search'
+        - $ref: '#/components/parameters/displayType'
+      responses:
+        200:
+          description: Group list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupListResponse'
+              examples:
+                display-type=list:
+                  value:
+                    - id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                      name: Administrators
+                      private: false
+                display-type=table:
+                  value:
+                    - id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                      name: Administrators
+                      private: false
+                      userCount: 5
+                      managers:
+                        - id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                          username: admin
+                          email: admin@example.com
+                      createdAt: 2025-04-30 12:00:00
+                      createdBy: admin
+                      updatedAt: 2025-05-30 12:00:00
+                      updatedBy: admin
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+        - Groups
+      summary: Create a new Group
+      description: Create a new Group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGroupRequest'
+      responses:
+        201:
+          description: Group created Successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupWithUsersAndManagers'
+        400:
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        409:
+          description: A group with the provided name already exists
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    $ref: '#/components/schemas/Id'
+  /groups/{id}:
+    get:
+      tags:
+        - Groups
+      summary: Retrieve a group
+      description: Retrieve a group by its id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        200:
+          description: Group response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupWithUsersAndManagers'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Group not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      tags:
+        - Groups
+      summary: Patch a group
+      description: Update given group fields, admins can promote/demote managers and remove users, group managers can add/remove users
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchGroupRequest"
+      responses:
+        200:
+          description: Group updated Successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupWithUsersAndManagers'
+        400:
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Group not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /groups/{id}/delete:
+    post:
+      tags:
+        - Groups
+      summary: Delete a group
+      description: Delete a group by its id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientEncryptedData"
+        description: >
+          The request body must contain the user's encrypted password data
+          used for authentication:
+          `encryptedData`, `clientPublicKey`, and `nonce`.
+      responses:
+        204:
+          description: Group deleted Successfully
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: Group not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /login_check:
+    post:
+      tags:
+        - Authentication
+      summary: User authentication
+      description: Authenticates a user and returns a JWT token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        description: >
+          The request body must include `encryptedCredentials`, which is the
+          encrypted form of the user's login data:
+          `{"username": "<string>", "email": "<string>"}`.
+          The encryption output must follow the `ClientEncryptedData` schema,
+          containing `encryptedData`, `clientPublicKey`, and `nonce`.
+      responses:
+        200:
+          description: Successful login
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        400:
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+  /passwords:
+    post:
+      tags:
+        - Passwords
+      summary: Create a new password
+      description: Create a new password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePasswordRequest'
+        description: If groups are omitted from the request body, the groups from the parent resource will be used.
+      responses:
+        201:
+          description: Password created Successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordWithFolderWithGroups'
+        400:
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /passwords/{id}:
+    get:
+      tags:
+        - Passwords
+      summary: Retrieve a password
+      description: Retrieve a password by its id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        200:
+          description: Password response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordWithFolderWithGroups'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Folder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      tags:
+        - Passwords
+      summary: Patch a password
+      description: Update given password fields
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  example: "My Password"
+                description:
+                  type: string
+                  example: "My Password Description"
+                  nullable: true
+                target:
+                  type: string
+                  example: "https://example.com"
+                  nullable: true
+                location:
+                  type: string
+                  example: My Password Location
+                  nullable: true
+                externalId:
+                  type: string
+                  example: 123
+                  nullable: true
+      responses:
+        200:
+          description: Password updated Successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordWithFolderWithGroups'
+        400:
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: Password not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /passwords/{id}/changelogs/{logId}:
+    get:
+      tags:
+        - Passwords
+      summary: Retrieve a password changelog
+      description: Retrieve a single password changelog by its id or all changelogs for a password
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - name: logId
+          in: path
+          required: false
+          schema:
+            $ref: '#/components/schemas/Id'
+      responses:
+        200:
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangelogSummarizedList'
+              examples:
+                changelogList:
+                  value:
+                    - id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                      type: updated
+                      fields: ["name", "updatedBy"]
+                      timestamp: 2025-04-30 12:00:00
+                changelog:
+                  value:
+                    id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                    actionType: updated
+                    userEmail: admin@example.com
+                    oldValues: { "email": "old@email.com" }
+                    newValues: { "email": "new@email.com" }
+                    createdAt: 2025-04-30 12:00:00
+        400:
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Password not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /passwords/{id}/delete:
+    post:
+      tags:
+        - Passwords
+      summary: Delete a password
+      description: Delete a password by its id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientEncryptedData"
+        description: >
+          The request body must contain the user's encrypted password data
+          used for authentication:
+          `encryptedData`, `clientPublicKey`, and `nonce`.
+      responses:
+        204:
+          description: Password deleted Successfully
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: Password not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /passwords/{id}/permissions:
+    patch:
+      tags:
+        - Passwords
+      summary: Patch password permissions
+      description: Update password permissions
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchPermissions"
+      responses:
+        204:
+          description: Password permissions updated successfully
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: Password not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /passwords/{id}/sensitive:
+    get:
+      tags:
+        - Passwords
+      summary: Retrieve sensitive data for a password
+      description: Retrieve sensitive data for a password by its id encrypted with the user's public key
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientEncryptedData'
+        description: >
+          The request body must contain the user's encrypted password data
+          used for authentication:
+          `encryptedData`, `clientPublicKey`, and `nonce`.
+      responses:
+        200:
+          description: Password sensitive data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordSensitiveDataResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Password not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      tags:
+        - Passwords
+      summary: Update sensitive data for a password
+      description: Update sensitive data for a password by its id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                encryptedUserPassword:
+                  $ref: '#/components/schemas/ClientEncryptedData'
+                encryptedPassword:
+                  $ref: '#/components/schemas/ClientEncryptedData'
+                encryptedUsername:
+                  allOf:
+                    - $ref: '#/components/schemas/ClientEncryptedData'
+                    - nullable: true
+      responses:
+        204:
+          description: Password sensitive data updated successfully
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: Password not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /passwords/search:
+    get:
+      tags:
+        - Passwords
+      summary: Search for passwords
+      description: Search for passwords
+      parameters:
+        - $ref: "#/components/parameters/search"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/limit"
+        - name: vaultId
+          in: query
+          required: false
+          description: Filter by vault id
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Passwords response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/PasswordMinimised"
+                        - type: object
+                          properties:
+                            target:
+                              type: string
+                              example: "https://example.com"
+                              nullable: true
+                            externalId:
+                              type: string
+                              example: 123
+                              nullable: true
+                            vault:
+                              $ref: '#/components/schemas/VaultMinimised'
+                            folder:
+                              allOf:
+                                - $ref: '#/components/schemas/FolderMinimised'
+                                - nullable: true
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        400:
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /register/{token}:
+    post:
+      tags:
+        - Authentication
+      summary: Register User
+      description: Complete registration for a user
+      parameters:
+        - $ref: "#/components/parameters/token"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                encryptedPassword:
+                  $ref: '#/components/schemas/ClientEncryptedData'
+              required:
+                - encryptedPassword
+      responses:
+        204:
+          description: User registered successfully
+        400:
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /share-processes:
+    get:
+      tags:
+        - Share Processes
+      summary: Retrieve share processes
+      description: Retrieve share processes
+      parameters:
+        - $ref: "#/components/parameters/search"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/limit"
+        - name: userEmail
+          in: query
+          required: false
+          description: Filter by user email
+          schema:
+            type: string
+        - name: targetType
+          in: query
+          required: false
+          description: Filter by target type
+          schema:
+            type: string
+            enum: [folder, vault]
+        - name: status
+          in: query
+          required: false
+          description: Filter by status
+          schema:
+            type: string
+            enum: [pending, running, completed, failed, canceled]
+        - name: startDate
+          in: query
+          required: false
+          description: Filter by start date
+          schema:
+            type: string
+            format: date-time
+            example: 2025-04-30 12:00:00
+        - name: endDate
+          in: query
+          required: false
+          description: Filter by end date
+          schema:
+            type: string
+            format: date-time
+            example: 2025-04-30 13:00:00
+      responses:
+        200:
+          description: Share processes response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ShareProcess'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        400:
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+  /token/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Refresh JWT token
+      description: Get a new JWT token using a refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        200:
+          description: Token successfully refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        400:
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Invalid refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+  /users:
+    get:
+      tags:
+        - Users
+      summary: User list
+      description: Returns a list of users
+      parameters:
+        - $ref: '#/components/parameters/search'
+        - $ref: '#/components/parameters/displayType'
+        - name: activeOnly
+          in: query
+          required: false
+          description: If true, only active users will be returned
+          schema:
+            type: boolean
+            default: false
+      responses:
+        200:
+          description: User list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+              examples:
+                display-type=list:
+                  value:
+                    - id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                      username: admin
+                      email: admin@email.com
+                display-type=table:
+                  value:
+                    - id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                      username: admin
+                      email: admin@email.com
+                      managedGroupIds:
+                        - 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                      admin: true
+                      varified: true
+                      active: true
+                      createdAt: 2025-04-30 12:00:00
+                      createdBy: admin
+                      updatedAt: 2025-05-30 12:00:00
+                      updatedBy: admin
+                      groups:
+                        - id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                          name: Administrators
+        400:
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+        - Users
+      summary: Create a new User
+      description: Create a new User and send an invitation email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        201:
+          description: User created Successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserWithGroups'
+        400:
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        502:
+          description: Failed to send email
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /users/{id}:
+    get:
+      tags:
+        - Users
+      summary: Retrieve a User
+      description: Retrieve a User by its id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        200:
+          description: User response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserWithGroups'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      tags:
+        - Users
+      summary: Patch a User
+      description: Update given user fields, it is only possible to remove groups
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchUserRequest"
+      responses:
+        200:
+          description: User updated Successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserWithGroups'
+        400:
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /users/{id}/block:
+    post:
+      tags:
+        - Users
+      summary: Block a user
+      description: Block a users access and invalidate all refreshTokens
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        204:
+          description: User successfully blocked
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /users/{id}/unblock:
+    post:
+      tags:
+        - Users
+      summary: Unblock a user
+      description: Unblock a users access
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        204:
+          description: User successfully unblocked
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /users/{id}/vaults:
+    get:
+      tags:
+        - Users
+      summary: Retrieve all vaults a user has access to
+      description: Retrieve all vaults a user has access to by user id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        200:
+          description: Vault response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultListResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /vaults:
+    post:
+      tags:
+        - Vaults
+      summary: Create a new Vault
+      description: Create a new Vault
+      requestBody:
+        required: true
+        description: If groups are omitted from the request body, the groups from the parent resource will be used.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: My Vault
+                groups:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/RequestGroupPermission"
+                mandatoryFolderFields:
+                  type: array
+                  items:
+                    type: string
+                    enum: [external_id]
+                  example: [external_id]
+                mandatoryPasswordFields:
+                  type: array
+                  items:
+                    type: string
+                    enum: [external_id, target, location]
+                  example: [external_id, location]
+                iconName:
+                  type: string
+                  example: "folder"
+                  description: Can be any material icon from google fonts
+                allowPasswordsAtRoot:
+                  type: boolean
+                  example: true
+                  description: If true, passwords can be added to the vault root
+              required:
+                - name
+      responses:
+        201:
+          description: Vault created Successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultMinimisedWithGroupsWithMandatoryFields'
+        400:
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /vaults/{id}:
+    get:
+      tags:
+        - Vaults
+      summary: Retrieve a Vault
+      description: Retrieve a Vault by its id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        200:
+          description: Vault response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultMinimisedWithGroupsWithMandatoryFields'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Vault not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      tags:
+        - Vaults
+      summary: Update a Vault
+      description: Update a Vault by its id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: My Vault
+                groups:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/RequestGroupPermissionWithPartial"
+                mandatoryFolderFields:
+                  type: array
+                  description: Mandatory fields for folders in this vault
+                  items:
+                    type: string
+                    enum: [external_id]
+                  nullable: true
+                  example: [external_id]
+                mandatoryPasswordFields:
+                  type: array
+                  description: Mandatory fields for passwords in this vault
+                  items:
+                    type: string
+                    enum: [external_id, target, location]
+                  nullable: true
+                  example: [external_id, target]
+                iconName:
+                  type: string
+                  example: "folder"
+                  description: Can be any material icon from google fonts
+                allowPasswordsAtRoot:
+                  type: boolean
+                  example: true
+                  description: If true, passwords can be added to the vault root
+              required:
+                - name
+      responses:
+        200:
+          description: Vault updated Successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultMinimisedWithGroupsWithMandatoryFields'
+        400:
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: Vault not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /vaults/{id}/changelog/{logId}:
+    get:
+      tags:
+        - Vaults
+      summary: Retrieve a vault changelog entry
+      description: Retrieve a single vault changelog by its id or all changelogs for a vault
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - name: logId
+          in: path
+          required: false
+          schema:
+            $ref: '#/components/schemas/Id'
+      responses:
+        200:
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangelogSummarizedList'
+              examples:
+                changelogList:
+                  value:
+                    - id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                      type: updated
+                      fields: ["name", "updatedBy"]
+                      timestamp: 2025-04-30 12:00:00
+                changelog:
+                  value:
+                    id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                    actionType: updated
+                    userEmail: admin@example.com
+                    oldValues: { "email": "old@email.com" }
+                    newValues: { "email": "new@email.com" }
+                    createdAt: 2025-04-30 12:00:00
+        400:
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Vault not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /vaults/{id}/delete:
+    post:
+      tags:
+        - Vaults
+      summary: Delete a vault
+      description: Delete a vault by its id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientEncryptedData"
+        description: >
+          The request body must contain the user's encrypted password data
+          used for authentication:
+          `encryptedData`, `clientPublicKey`, and `nonce`.
+      responses:
+        204:
+          description: Vault deleted Successfully
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: Vault not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /vaults/{id}/permissions:
+    patch:
+      tags:
+        - Vaults
+      summary: Patch vault permissions
+      description: Update vault permissions
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchPermissionsWithPartial"
+      responses:
+        202:
+          description: Vault permissions update request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareProcessMinimised'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: Vault not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /vaults/{id}/structure:
+    get:
+      tags:
+        - Vaults
+      summary: Retrieve a vault folder structure
+      description: Retrieve the folder and password structure for a vault by vault id
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        200:
+          description: Vault structure response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  folders:
+                    type: array
+                    items:
+                      - $ref: '#/components/schemas/FolderStructure'
+                  passwords:
+                    type: array
+                    items:
+                      - $ref: '#/components/schemas/PasswordMinimised'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Folder not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  parameters:
+    id:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+    search:
+      name: search
+      in: query
+      description: Text used by the search to filter the results on
+      schema:
+        type: string
+    token:
+      name: token
+      in: path
+      required: true
+      description: Token to identify the request
+      schema:
+        type: string
+    displayType:
+      name: displayType
+      in: query
+      schema:
+        type: string
+        enum:
+          - list
+          - table
+        default: list
+        description: Determines the level of detail included in the response
+    limit:
+      name: limit
+      in: query
+      description: Number of items per page
+      required: false
+      schema:
+        type: integer
+        default: 50
+    page:
+      name: page
+      in: query
+      description: Page number for pagination
+      required: false
+      schema:
+        type: integer
+        default: 1
+        minimum: 1
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained after authentication
+
+  schemas:
+    LoginRequest:
+      type: object
+      required:
+        - encryptedCredentials
+      properties:
+        encryptedCredentials:
+          $ref: '#/components/schemas/ClientEncryptedData'
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT authentication token
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        refresh_token:
+          type: string
+          description: JWT refresh token for obtaining new access tokens
+          example: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    AccessDeniedErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error Type
+          example: Access Denied
+    AuthenticationErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Error message
+          example: Invalid credentials.
+        code:
+          type: integer
+          description: Error code
+          example: 401
+    UnprocessableEntityErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Unprocessable entity error type
+          example: Unprocessable Entity
+        message:
+          type: array
+          description: Unprocessable entity error message
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+                example: 1c407a1d-5cf4-47e0-9a58-3cd72532b846
+                nullable: true
+              message:
+                type: string
+                example: This value should be of type string.
+              parameter:
+                type: string
+                example: title
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Error message
+          example: Parameter must be provided.
+        error:
+          type: string
+          description: Error type
+          example: HTTP Error
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refresh_token
+      properties:
+        refresh_token:
+          type: string
+          description: The refresh token obtained during login
+          example: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    Id:
+      type: string
+      format: uuid
+      description: Unique resource identifier (UUID)
+      example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+    NullableId:
+      type: string
+      format: uuid
+      description: Unique resource identifier (UUID)
+      example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+      nullable: true
+    DateTime:
+      type: string
+      description: Timestamp in format Y-m-d H:i:s
+      example: "2025-04-30 14:23:55"
+    NullableDateTime:
+      type: string
+      description: Timestamp in format Y-m-d H:i:s
+      example: "2025-04-30 14:23:55"
+      nullable: true
+    CreatedBy:
+      type: string
+      description: User that created this resource
+      example: admin
+    UpdatedBy:
+      type: string
+      description: User that updated this resource
+      example: admin
+    CreatedAt:
+      type: string
+      description: Timestamp from when this resource was created
+      example: "2025-04-30 14:23:55"
+    UpdatedAt:
+      type: string
+      description: Timestamp from when this resource was updated
+      example: "2025-04-30 14:23:55"
+    EditorFields:
+      type: object
+      properties:
+        createdAt:
+          $ref: '#/components/schemas/CreatedAt'
+        createdBy:
+          $ref: '#/components/schemas/CreatedBy'
+        updatedAt:
+          $ref: '#/components/schemas/UpdatedAt'
+        updatedBy:
+          $ref: '#/components/schemas/UpdatedBy'
+    GroupListResponse:
+      type: array
+      items:
+        oneOf:
+          - $ref: '#/components/schemas/GroupMinimised'
+          - $ref: '#/components/schemas/GroupWithUserCountAndManagers'
+    GroupMinimised:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        name:
+          type: string
+          description: Name of the group
+          example: Administrators
+        private:
+          type: boolean
+          description: Indicates if the group is private
+          example: false
+    Group:
+      allOf:
+        - $ref: '#/components/schemas/GroupMinimised'
+        - $ref: '#/components/schemas/EditorFields'
+    GroupWithUserCount:
+      allOf:
+        - $ref: '#/components/schemas/Group'
+        - type: object
+          properties:
+            userCount:
+              type: number
+              description: Number of users in this group
+              example: 5
+    GroupWithUserCountAndManagers:
+      allOf:
+        - $ref: "#/components/schemas/GroupWithUserCount"
+        - type: object
+          properties:
+            managers:
+              type: array
+              description: Managers of this group
+              items:
+                $ref: '#/components/schemas/UserMinimised'
+    GroupWithUsers:
+      allOf:
+        - $ref: '#/components/schemas/Group'
+        - type: object
+          properties:
+            users:
+              type: array
+              description: users in this group
+              items:
+                $ref: '#/components/schemas/UserMinimised'
+    GroupWithUsersAndManagers:
+      allOf:
+        - $ref: "#/components/schemas/GroupWithUsers"
+        - type: object
+          properties:
+            managers:
+              type: array
+              description: Managers of this group
+              items:
+                $ref: '#/components/schemas/UserMinimised'
+    UserListResponse:
+      type: array
+      items:
+        oneOf:
+          - $ref: '#/components/schemas/UserMinimised'
+          - $ref: '#/components/schemas/UserWithGroups'
+    UserMinimised:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        email:
+          type: string
+          format: email
+          description: User email address
+          example: admin@email.com
+        username:
+          type: string
+          description: User display name
+          example: admin
+    User:
+      allOf:
+        - $ref: '#/components/schemas/UserMinimised'
+        - type: object
+          properties:
+            managedGroupIds:
+              type: array
+              description: Ids of groups managed by this user
+              items:
+                - $ref: '#/components/schemas/Id'
+            admin:
+              type: boolean
+              description: Is the user an admin
+              example: true
+            verified:
+              type: boolean
+              description: Is the user verified
+              example: true
+            active:
+              type: boolean
+              description: Is the use active
+              example: true
+        - $ref: '#/components/schemas/EditorFields'
+    UserWithGroups:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          properties:
+            groups:
+              type: array
+              description: Groups of the user
+              items:
+                $ref: "#/components/schemas/GroupMinimised"
+    CreateUserRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          description: User email address
+          example: admin@email.com
+        username:
+          type: string
+          description: User display name
+          example: admin
+        admin:
+          type: boolean
+          description: Is the user an admin
+          example: true
+      required:
+        - email
+        - username
+        - admin
+    PatchUserRequest:
+      type: object
+      properties:
+        admin:
+          type: boolean
+          description: Is the user an admin
+          example: true
+        groups:
+          type: array
+          description: Groups for the User
+          items:
+            $ref: '#/components/schemas/Id'
+    CreateGroupRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Name of the group
+          example: Developers
+        managers:
+          type: array
+          description: Manager(s) of this group
+          items:
+            $ref: '#/components/schemas/Id'
+        users:
+          type: array
+          description: Users in this group
+          items:
+            $ref: '#/components/schemas/Id'
+      required:
+        - name
+        - managers
+    PatchGroupRequest:
+      type: object
+      properties:
+        encryptedPassword:
+          $ref: "#/components/schemas/ClientEncryptedData"
+        users:
+          type: array
+          description: Users in this group
+          items:
+            $ref: '#/components/schemas/Id'
+        managers:
+          type: array
+          description: Managers of this group
+          items:
+            $ref: '#/components/schemas/Id'
+    VaultMinimised:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        name:
+          type: string
+          description: Name of the vault
+          example: Development
+        private:
+          type: boolean
+          description: Indicates if the vault is private
+          example: false
+        iconName:
+          type: string
+          description: Name of the vault icon
+          example: "icon-name"
+        allowPasswordsAtRoot:
+          type: boolean
+          description: Indicates if passwords can be stored at the root level
+          example: false
+    VaultMinimisedWithGroups:
+      allOf:
+        - $ref: '#/components/schemas/VaultMinimised'
+        - type: object
+          properties:
+            groups:
+              type: array
+              description: Groups that have access to the vault
+              items:
+                $ref: "#/components/schemas/GroupMinimised"
+    VaultMinimisedWithGroupsWithMandatoryFields:
+      allOf:
+        - $ref: '#/components/schemas/VaultMinimisedWithGroups'
+        - type: object
+          properties:
+            mandatoryFolderFields:
+              type: array
+              description: Mandatory fields for folders in this vault
+              items:
+                type: string
+                enum: [external_id]
+              nullable: true
+              example: [external_id]
+            mandatoryPasswordFields:
+              type: array
+              description: Mandatory fields for passwords in this vault
+              items:
+                type: string
+                enum: [external_id, target, location]
+              nullable: true
+              example: [external_id, target]
+    VaultListResponse:
+      type: array
+      items:
+        $ref: '#/components/schemas/VaultMinimisedWithGroupsWithMandatoryFields'
+    PaginatedAuditLogListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLog'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+    Pagination:
+      type: object
+      properties:
+        next:
+          type: string
+          format: uri
+          nullable: true
+          description: URL to the next page of results
+        previous:
+          type: string
+          format: uri
+          nullable: true
+          description: URL to the previous page of results
+    AuditLog:
+      allOf:
+        - $ref: '#/components/schemas/Changelog'
+        - type: object
+          properties:
+            entityType:
+              type: string
+              description: Type of entity affected
+              example: App\Entity\User
+              nullable: true
+            userId:
+              $ref: '#/components/schemas/NullableId'
+            ipAddress:
+              type: string
+              description: IP address of the user that performed the action
+              example: 127.0.0.1
+              nullable: true
+            userAgent:
+              type: string
+              description: User agent of the user that performed the action
+              example: chrome web browser
+              nullable: true
+            metadata:
+              type: string
+              description: Metadat to identify the affected resource
+              example: Password-123[example.com]
+    Changelog:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        actionType:
+          type: string
+          description: Type of action performed
+          example: created
+          enum: [created, read, updated, deleted, successful_login, failed_login, refreshed_token]
+        userEmail:
+          type: string
+          description: Email of the user that performed the action
+          example: admin @example.com
+          format: email
+          nullable: true
+        oldValues:
+          type: object
+          description: Old values of the entity
+          example: { "email": "old@email.com" }
+          nullable: true
+        newValues:
+          type: object
+          description: New values of the entity
+          example: { "email": "new@email.com" }
+          nullable: true
+        createdAt:
+          $ref: '#/components/schemas/NullableDateTime'
+    ChangelogSummarized:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        type:
+          type: string
+          description: Type of action performed
+          example: created
+          enum: [created, read, updated, deleted, successful_login, failed_login, refreshed_token]
+        fields:
+          type: array
+          items:
+            type: string
+            description: Fields that have changed
+            example: ["email", "username"]
+        timeStamp:
+          $ref: '#/components/schemas/DateTime'
+    ChangelogSummarizedList:
+      type: array
+      items:
+        $ref: '#/components/schemas/ChangelogSummarized'
+    ClientEncryptedData:
+      type: object
+      properties:
+        encryptedData:
+          type: string
+          description: Base 64 Url encoded encrypted data
+          example: QzZ3VnZxV1pKZFp1aHh0V1VqQkF1N1lrd0pFb3F1V2E
+        clientPublicKey:
+          type: string
+          description: Base 64 Url public key of the client
+          example: QzZ3VnZxV1pKZFp1aHh0V1VqQkF1N1lrd0pFb3F1V2E
+        nonce:
+          type: string
+          description: Base 64 url encoded nonce used to encrypt the data
+          example: QzZ3VnZxV1pKZFp1aHh0V1VqQkF1N1lrd0pFb3F1V2E
+    UserEncryptedData:
+      type: object
+      properties:
+        encryptedData:
+          type: string
+          description: Base 64 Url encoded encrypted data
+          example: QzZ3VnZxV1pKZFp1aHh0V1VqQkF1N1lrd0pFb3F1V2E
+        userPublicKey:
+          type: string
+          description: Base 64 Url public key of the user
+          example: QzZ3VnZxV1pKZFp1aHh0V1VqQkF1N1lrd0pFb3F1V2E
+        nonce:
+          type: string
+          description: Base 64 url encoded nonce used to encrypt the data
+          example: QzZ3VnZxV1pKZFp1aHh0V1VqQkF1N1lrd0pFb3F1V2E
+    FolderMinimised:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        name:
+          type: string
+          description: Name of the folder
+          example: Development
+    Folder:
+      allOf:
+        - $ref: '#/components/schemas/FolderMinimised'
+        - $ref: '#/components/schemas/EditorFields'
+        - type: object
+          properties:
+            externalId:
+              type: string
+              description: External Id of the folder
+              example: 123
+    FolderWithGroups:
+      allOf:
+        - $ref: '#/components/schemas/Folder'
+        - type: object
+          properties:
+            groups:
+              type: array
+              description: Groups that have access to the folder
+              items:
+                $ref: "#/components/schemas/ResponseGroupPermissionWithPartial"
+    ResponseGroupPermission:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        name:
+          type: string
+          description: Name of the group
+          example: Administrators
+        canWrite:
+          type: boolean
+          description: Can the group write to this resource
+          example: true
+    ResponseGroupPermissionWithPartial:
+      allOf:
+        - $ref: '#/components/schemas/ResponseGroupPermission'
+        - type: object
+          properties:
+            partial:
+              type: boolean
+              description: Does the group see only part of the resources in this resource
+              example: false
+    RequestGroupPermission:
+      type: object
+      properties:
+        groupId:
+          $ref: '#/components/schemas/Id'
+        canWrite:
+          type: boolean
+          description: Can the group write to this resource
+          example: true
+    RequestGroupPermissionWithPartial:
+      allOf:
+        - $ref: '#/components/schemas/RequestGroupPermission'
+        - type: object
+          properties:
+            partial:
+              type: boolean
+              description: Does the group see only part of the resources in this resource(cannot be manually overridden)
+              example: false
+    CreateFolderRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Name of the folder
+          example: Development
+        vaultId:
+          $ref: '#/components/schemas/Id'
+        parentFolderId:
+          $ref: '#/components/schemas/NullableId'
+        externalId:
+          type: string
+          description: External Id of the folder
+          example: 123
+          nullable: true
+        groups:
+          type: array
+          description: Groups that have access to the folder
+          items:
+            $ref: "#/components/schemas/RequestGroupPermission"
+      required:
+        - name
+        - vaultId
+    PasswordMinimised:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        title:
+          type: string
+          description: Title of the password
+          example: Password-123
+    Password:
+      allOf:
+        - $ref: '#/components/schemas/PasswordMinimised'
+        - $ref: '#/components/schemas/EditorFields'
+        - type: object
+          properties:
+            target:
+              type: string
+              description: Target of the password
+              example: https://example.com
+              nullable: true
+            description:
+              type: string
+              description: Description of the password
+              example: Password for example.com
+              nullable: true
+            location:
+              type: string
+              description: Location of the password
+              example: floor 1
+            externalId:
+              type: string
+              description: External Id of the password
+              example: 123
+              nullable: true
+    PasswordWithGroups:
+      allOf:
+        - $ref: '#/components/schemas/Password'
+        - type: object
+          properties:
+            groups:
+              type: array
+              description: Groups that have access to the password
+              items:
+                $ref: "#/components/schemas/ResponseGroupPermission"
+    PasswordWithFolderWithGroups:
+      allOf:
+        - $ref: '#/components/schemas/PasswordWithGroups'
+        - type: object
+          properties:
+            folder:
+              $ref: '#/components/schemas/FolderMinimised'
+    PasswordWithGroupsList:
+      type: array
+      items:
+        $ref: '#/components/schemas/PasswordWithGroups'
+    FolderStructure:
+      allOf:
+        - $ref: '#/components/schemas/FolderMinimised'
+        - type: object
+          properties:
+            parentId:
+              $ref: '#/components/schemas/NullableId'
+    PatchPermissionsWithPartial:
+      type: object
+      properties:
+        encryptedPassword:
+          $ref: "#/components/schemas/ClientEncryptedData"
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/RequestGroupPermissionWithPartial"
+        cascade:
+          type: boolean
+          default: false
+          description: Set to true to apply the permissions to all sub resources
+      required:
+        - encryptedPassword
+        - groups
+    PatchPermissions:
+      type: object
+      properties:
+        encryptedPassword:
+          $ref: "#/components/schemas/ClientEncryptedData"
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/RequestGroupPermission"
+      required:
+        - encryptedPassword
+        - groups
+    ShareProcessMinimised:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        scopeId:
+          type: string
+          description: On which resource the share is applied
+          format: uuid
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        metadata:
+          type: string
+          description: Metadata to identify the affected resource
+          example: Password-123[example.com]
+        targetType:
+          type: string
+          description: Type of resource that is shared
+          enum: [password, folder]
+          example: password
+        cascade:
+          type: boolean
+          default: false
+          description: Set to true to apply the permissions to all sub resources
+        requestedGroups:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/RequestGroupPermissionWithPartial'
+              - type: object
+                properties:
+                  name:
+                    type: string
+                    description: Name of the group
+                    example: Administrators
+        status:
+          type: string
+          description: Status of the share
+          enum: [pending, completed, failed, canceled, running]
+          example: pending
+    ShareProcess:
+      allOf:
+        - $ref: '#/components/schemas/ShareProcessMinimised'
+        - type: object
+          properties:
+            totalItems:
+              type: number
+              description: Total number of items to be shared
+              example: 100
+            processedItems:
+              type: number
+              description: Number of items that have been processed
+              example: 0
+            failedItems:
+              type: number
+              description: Number of items that have failed
+              example: 0
+            message:
+              type: string
+              description: Message to display to the user
+              example: "Processing 100 items"
+            createdAt:
+              $ref: '#/components/schemas/CreatedAt'
+            createdBy:
+              $ref: '#/components/schemas/CreatedBy'
+            updatedAt:
+              $ref: '#/components/schemas/UpdatedAt'
+            startedAt:
+              type: string
+              description: Timestamp from when the share process started
+              example: "2025-04-30 14:23:55"
+            finishedAt:
+              type: string
+              description: Timestamp from when the share process finished
+              example: "2025-04-30 14:23:55"
+    CreatePasswordRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Title of the password
+          example: Password-123
+        encryptedPassword:
+          $ref: "#/components/schemas/ClientEncryptedData"
+        encryptedUsername:
+          $ref: "#/components/schemas/ClientEncryptedData"
+        target:
+          type: string
+          description: Target of the password
+          example: https://example.com
+          nullable: true
+        description:
+          type: string
+          description: Description of the password
+          example: Password for example.com
+        location:
+          type: string
+          description: Location of the password
+          example: floor 1
+        externalId:
+          type: string
+          description: External Id of the password
+          example: 123
+          nullable: true
+        vaultId:
+          $ref: '#/components/schemas/Id'
+        folderId:
+          $ref: '#/components/schemas/NullableId'
+        groups:
+          type: array
+          description: Groups that have access to the password
+          items:
+            $ref: "#/components/schemas/RequestGroupPermission"
+      required:
+        - title
+        - encryptedPassword
+        - vaultId
+    PasswordSensitiveDataResponse:
+      type: object
+      properties:
+        username:
+          allOf:
+            - $ref: "#/components/schemas/UserEncryptedData"
+            - nullable: true
+        password:
+          $ref: "#/components/schemas/UserEncryptedData"
+        userKeys:
+          type: object
+          properties:
+            privateKey:
+              type: string
+              description: Encrypted private key of the user
+              example: verySecretKey
+            nonce:
+              type: string
+              description: Nonce used to encrypt the data
+              example: verySecretKey
+            salt:
+              type: string
+              description: Salt used to encrypt the users private key
+              example: verySecretKey
