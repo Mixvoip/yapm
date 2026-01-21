@@ -245,11 +245,26 @@ readonly class PartialAccessCleaner
     {
         $folders = array_merge([$folderId], $this->getDescendantFolders($folderId));
 
-        return (bool)$this->db->fetchOne(
+        $hasPassword = (bool)$this->db->fetchOne(
             "SELECT 1
                FROM groups_passwords gp
                JOIN passwords p ON p.id = gp.password_id
               WHERE gp.group_id = :gid AND p.folder_id IN (:fids)
+              LIMIT 1",
+            ['gid' => $groupId, 'fids' => $folders],
+            ['fids' => ArrayParameterType::STRING]
+        );
+
+        if ($hasPassword) {
+            return true;
+        }
+
+        return (bool)$this->db->fetchOne(
+            "SELECT 1
+               FROM folders_groups fg
+               JOIN groups g ON g.id = fg.group_id
+              WHERE fg.folder_id IN (:fids) AND fg.group_id = :gid
+                AND NOT (fg.partial = 1 AND fg.can_write = 0)
               LIMIT 1",
             ['gid' => $groupId, 'fids' => $folders],
             ['fids' => ArrayParameterType::STRING]
@@ -267,12 +282,26 @@ readonly class PartialAccessCleaner
      */
     private function hasVaultJustification(string $vaultId, string $groupId): bool
     {
-        return (bool)$this->db->fetchOne(
+        $hasPassword = (bool)$this->db->fetchOne(
             "SELECT 1
                FROM groups_passwords gp
                JOIN passwords p ON p.id = gp.password_id
               WHERE gp.group_id = :gid AND p.vault_id = :vid
               LIMIT 1",
+            ['gid' => $groupId, 'vid' => $vaultId]
+        );
+
+        if ($hasPassword) {
+            return true;
+        }
+
+        return (bool)$this->db->fetchOne(
+            "SELECT 1
+                FROM folders_groups fg
+                JOIN folders f ON f.id = fg.folder_id
+                WHERE fg.group_id = :gid AND f.vault_id = :vid
+                AND NOT (fg.partial = 1 AND fg.can_write = 0)
+            LIMIT 1",
             ['gid' => $groupId, 'vid' => $vaultId]
         );
     }

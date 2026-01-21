@@ -28,7 +28,7 @@ use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Uid\Uuid;
 use Throwable;
 
-#[AsMessageHandler]
+#[AsMessageHandler(sign: true)]
 class ShareProcessMessageHandler
 {
     private const int BATCH_SIZE = 500;
@@ -128,7 +128,7 @@ class ShareProcessMessageHandler
     private function loadProcessRow(string $id): ?array
     {
         $row = $this->db()->fetchAssociative(
-            "SELECT id, status, created_by, requested_groups, target_type, scope_id, is_cascade
+            "SELECT id, status, created_by, requested_groups, requested_users, target_type, scope_id, is_cascade
                FROM share_processes
               WHERE id = :id",
             ['id' => $id],
@@ -139,6 +139,7 @@ class ShareProcessMessageHandler
         }
 
         $row['requested_groups'] = json_decode($row['requested_groups'], true);
+        $row['requested_users'] = json_decode($row['requested_users'] ?? '[]', true) ?? [];
         $row['is_cascade'] = (bool)$row['is_cascade'];
 
         return $row;
@@ -236,6 +237,7 @@ class ShareProcessMessageHandler
                     fn(array $passwordIds) => $this->bulkUpdatePasswordPermissions(
                         $passwordIds,
                         $procRow['requested_groups'],
+                        $procRow['requested_users'] ?? [],
                         $decryptedPrivateKey,
                         $userRow
                     )
@@ -251,6 +253,7 @@ class ShareProcessMessageHandler
                     fn(array $folderIds) => $this->bulkUpdateFolderPermissions(
                         $folderIds,
                         $procRow['requested_groups'],
+                        $procRow['requested_users'] ?? [],
                         $userRow
                     )
                 );
@@ -328,6 +331,7 @@ class ShareProcessMessageHandler
      *
      * @param  array  $passwordIds
      * @param  array  $requestedGroups
+     * @param  array  $requestedUsers
      * @param  string  $decryptedPrivateKey
      * @param  array  $userRow
      *
@@ -337,6 +341,7 @@ class ShareProcessMessageHandler
     private function bulkUpdatePasswordPermissions(
         array $passwordIds,
         array $requestedGroups,
+        array $requestedUsers,
         string $decryptedPrivateKey,
         array $userRow
     ): array {
@@ -344,9 +349,25 @@ class ShareProcessMessageHandler
             return [];
         }
 
+        // Track groups with partial=true - these should be left unchanged (not added, not removed)
+        $partialGroupIds = array_map(
+            fn($g) => $g['groupId'],
+            array_filter($requestedGroups, fn($g) => $g['partial'] === true)
+        );
+        $partialUserGroupIds = array_map(
+            fn($u) => $u['groupId'],
+            array_filter($requestedUsers, fn($u) => $u['partial'] === true)
+        );
+
+        // Filter to only process groups with partial=false
         $requestedGroups = array_filter(
             $requestedGroups,
-            fn($g) => ($g['partial'] === false) // drop partial=true
+            fn($g) => ($g['partial'] === false)
+        );
+
+        $requestedUsers = array_filter(
+            $requestedUsers,
+            fn($u) => ($u['partial'] === false)
         );
 
         $results = [];
@@ -356,17 +377,37 @@ class ShareProcessMessageHandler
             $permByGroup[$rg['groupId']] = (bool)($rg['canWrite'] ?? false);
         }
 
-        // Load all current relations for all passwords at once
+        // Build user permission maps (keyed by groupId)
+        $requestedUserGroupIds = array_map(fn($u) => $u['groupId'], $requestedUsers);
+        $permByUserGroup = [];
+        foreach ($requestedUsers as $up) {
+            $permByUserGroup[$up['groupId']] = (bool)($up['canWrite'] ?? false);
+        }
+
+        // Fetch public keys for private groups
+        $publicKeyByUserGroup = [];
+        if (!empty($requestedUserGroupIds)) {
+            $publicKeyByUserGroup = $this->db()
+                                         ->executeQuery(
+                                             "SELECT id, public_key FROM groups WHERE id IN (:ids)",
+                                             ['ids' => $requestedUserGroupIds],
+                                             ['ids' => ArrayParameterType::STRING]
+                                         )
+                                         ->fetchAllKeyValue();
+        }
+
+        // Load all current relations for all passwords at once (excluding private groups for regular processing)
         $currentRelations = $this->db()
                                  ->executeQuery(
-                                     "SELECT 
+                                     "SELECT
                                         gp.password_id,
                                         gp.group_id,
                                         gp.can_write,
                                         p.title,
                                         p.external_id,
                                         p.target,
-                                        g.name AS group_name
+                                        g.name AS group_name,
+                                        g.private AS is_private
                                         FROM groups_passwords gp
                                         INNER JOIN passwords p ON p.id = gp.password_id
                                         INNER JOIN groups g ON g.id = gp.group_id
@@ -378,8 +419,9 @@ class ShareProcessMessageHandler
                                  )
                                  ->fetchAllAssociative();
 
-        // Group current relations by password
-        $currentByPassword = $this->mapPasswordRelations($currentRelations);
+        // Group current relations by password (split regular and private)
+        $currentByPassword = $this->mapPasswordRelations($currentRelations, false); // Regular groups only
+        $currentPrivateByPassword = $this->mapPasswordRelations($currentRelations, true); // Private groups only
         $metaByPassword = $this->buildPasswordMetadata($currentRelations);
         $groupNames = $this->buildGroupNameMap($currentRelations, $requestedGroups);
 
@@ -389,11 +431,28 @@ class ShareProcessMessageHandler
                 $current = $currentByPassword[$passwordId] ?? [];
                 $currentIds = array_keys($current);
 
-                $toRemove = array_diff($currentIds, $requestedIds);
+                // Exclude partial groups from removal - they should be left unchanged
+                $toRemove = array_diff($currentIds, $requestedIds, $partialGroupIds);
                 $toAdd = array_diff($requestedIds, $currentIds);
                 $toKeep = array_intersect($currentIds, $requestedIds);
 
-                // Add new groups if needed
+                // Handle user permissions (private groups) - calculate diffs first
+                $currentPrivate = $currentPrivateByPassword[$passwordId] ?? [];
+                $currentPrivateIds = array_keys($currentPrivate);
+                $toRemovePrivate = [];
+                $toAddPrivate = [];
+                $toKeepPrivate = [];
+
+                if (!empty($requestedUserGroupIds) || !empty($partialUserGroupIds) || !empty($currentPrivate)) {
+                    // Exclude partial user groups from removal - they should be left unchanged
+                    $toRemovePrivate = array_diff($currentPrivateIds, $requestedUserGroupIds, $partialUserGroupIds);
+                    $toAddPrivate = array_diff($requestedUserGroupIds, $currentPrivateIds);
+                    $toKeepPrivate = array_intersect($currentPrivateIds, $requestedUserGroupIds);
+                }
+
+                // === ADDITIONS FIRST (need decrypt path from existing groups) ===
+
+                // Add new regular groups if needed
                 if (!empty($toAdd)) {
                     $this->bulkAddPasswordGroups(
                         $passwordId,
@@ -403,7 +462,22 @@ class ShareProcessMessageHandler
                         $userRow
                     );
                 }
-                // Bulk remove
+
+                // Add new user group relations (private groups)
+                if (!empty($toAddPrivate)) {
+                    $this->bulkAddPasswordGroupsWithKeys(
+                        $passwordId,
+                        array_values($toAddPrivate),
+                        $permByUserGroup,
+                        $publicKeyByUserGroup,
+                        $decryptedPrivateKey,
+                        $userRow
+                    );
+                }
+
+                // === DELETIONS (safe now that additions are done) ===
+
+                // Remove regular groups
                 if (!empty($toRemove)) {
                     $this->db()->executeStatement(
                         "DELETE FROM groups_passwords
@@ -413,10 +487,36 @@ class ShareProcessMessageHandler
                     );
                 }
 
-                // Bulk update permissions for kept groups
+                // Remove user group relations (private groups)
+                if (!empty($toRemovePrivate)) {
+                    $this->db()->executeStatement(
+                        "DELETE FROM groups_passwords
+                             WHERE password_id = :pid AND group_id IN (:gids)",
+                        ['pid' => $passwordId, 'gids' => array_values($toRemovePrivate)],
+                        ['gids' => ArrayParameterType::STRING]
+                    );
+                }
+
+                // === UPDATES ===
+
+                // Update permissions for kept regular groups
                 foreach ($toKeep as $gid) {
                     $newCW = $permByGroup[$gid] ?? $current[$gid];
                     if ($newCW !== $current[$gid]) {
+                        $this->db()->executeStatement(
+                            "UPDATE groups_passwords
+                                 SET can_write = :canWrite
+                                 WHERE password_id = :pid AND group_id = :gid",
+                            ['canWrite' => $newCW, 'pid' => $passwordId, 'gid' => $gid],
+                            ['canWrite' => Types::BOOLEAN]
+                        );
+                    }
+                }
+
+                // Update permissions for kept user groups (private groups)
+                foreach ($toKeepPrivate as $gid) {
+                    $newCW = $permByUserGroup[$gid] ?? $currentPrivate[$gid];
+                    if ($newCW !== $currentPrivate[$gid]) {
                         $this->db()->executeStatement(
                             "UPDATE groups_passwords
                                  SET can_write = :canWrite
@@ -491,6 +591,52 @@ class ShareProcessMessageHandler
             return;
         }
 
+        // Load target group public keys
+        $publicKeyByGroup = $this->db()
+                                 ->executeQuery(
+                                     "SELECT id, public_key FROM groups WHERE id IN (:ids)",
+                                     ['ids' => $groupIds],
+                                     ['ids' => ArrayParameterType::STRING]
+                                 )
+                                 ->fetchAllKeyValue();
+
+        $this->bulkAddPasswordGroupsWithKeys(
+            $passwordId,
+            $groupIds,
+            $permByGroup,
+            $publicKeyByGroup,
+            $decryptedPrivateKey,
+            $userRow
+        );
+    }
+
+    /**
+     * Internal method to bulk add password group relationships with provided public keys.
+     *
+     * @param  string  $passwordId
+     * @param  array  $groupIds
+     * @param  array  $permByGroup
+     * @param  array  $publicKeyByGroup  Map of groupId -> publicKey
+     * @param  string  $decryptedPrivateKey
+     * @param  array  $userRow
+     *
+     * @return void
+     * @throws DBALException
+     * @throws RandomException
+     * @throws Exception
+     */
+    private function bulkAddPasswordGroupsWithKeys(
+        string $passwordId,
+        array $groupIds,
+        array $permByGroup,
+        array $publicKeyByGroup,
+        string $decryptedPrivateKey,
+        array $userRow
+    ): void {
+        if (empty($groupIds)) {
+            return;
+        }
+
         $decryptPath = $this->findDecryptPath($passwordId, $userRow['id']);
         if (is_null($decryptPath)) {
             throw new Exception("No decryption data for password.");
@@ -507,15 +653,6 @@ class ShareProcessMessageHandler
         $passwordKey = $this->getPasswordKey($passwordId, $groupKey, $decryptPath['group_id']);
 
         try {
-            // Load target group public keys
-            $groups = $this->db()
-                           ->executeQuery(
-                               "SELECT id, public_key FROM groups WHERE id IN (:ids)",
-                               ['ids' => $groupIds],
-                               ['ids' => ArrayParameterType::STRING]
-                           )
-                           ->fetchAllKeyValue();
-
             // Process in chunks for bulk insert
             foreach (array_chunk($groupIds, self::BULK_INSERT_SIZE) as $chunk) {
                 $placeholders = [];
@@ -523,11 +660,12 @@ class ShareProcessMessageHandler
                 $types = [];
 
                 foreach ($chunk as $i => $gid) {
-                    if (!isset($groups[$gid])) {
+                    $publicKey = $publicKeyByGroup[$gid] ?? null;
+                    if (is_null($publicKey)) {
                         continue;
                     }
 
-                    $keys = $this->encryptionService->encryptPasswordKeyForGroup($passwordKey, $groups[$gid]);
+                    $keys = $this->encryptionService->encryptPasswordKeyForGroup($passwordKey, $publicKey);
 
                     $placeholders[] = "(:pid_$i, :gid_$i, :nonce_$i, :enc_key_$i, :enc_pub_$i, :can_write_$i, :created_by_$i)";
 
@@ -560,6 +698,7 @@ class ShareProcessMessageHandler
      *
      * @param  array  $folderIds
      * @param  array  $requestedGroups
+     * @param  array  $requestedUsers
      * @param  array  $userRow
      *
      * @return array
@@ -568,6 +707,7 @@ class ShareProcessMessageHandler
     private function bulkUpdateFolderPermissions(
         array $folderIds,
         array $requestedGroups,
+        array $requestedUsers,
         array $userRow
     ): array {
         if (empty($folderIds)) {
@@ -585,17 +725,37 @@ class ShareProcessMessageHandler
             $partialByGroup[$gid] = (bool)($requestedGroup['partial'] ?? false);
         }
 
-        // Load all current relations
+        // Track user groups with partial=true - these should be left unchanged
+        $partialUserGroupIds = array_map(
+            fn($u) => $u['groupId'],
+            array_filter($requestedUsers, fn($u) => $u['partial'] === true)
+        );
+
+        // Build user permission maps (keyed by groupId) - only process partial=false
+        $requestedUsers = array_filter(
+            $requestedUsers,
+            fn($u) => ($u['partial'] === false)
+        );
+        $requestedUserGroupIds = array_map(fn($u) => $u['groupId'], $requestedUsers);
+        $permByUserGroup = [];
+        $partialByUserGroup = [];
+        foreach ($requestedUsers as $up) {
+            $permByUserGroup[$up['groupId']] = (bool)($up['canWrite'] ?? false);
+            $partialByUserGroup[$up['groupId']] = (bool)($up['partial'] ?? false);
+        }
+
+        // Load all current relations (including is_private flag)
         $currentRelations = $this->db()
                                  ->executeQuery(
-                                     "SELECT 
+                                     "SELECT
                                         fg.folder_id,
                                         fg.group_id,
                                         fg.can_write,
                                         fg.partial,
                                         f.name AS folder_name,
                                         f.external_id,
-                                        g.name AS group_name
+                                        g.name AS group_name,
+                                        g.private AS is_private
                                         FROM folders_groups fg
                                         INNER JOIN folders f ON f.id = fg.folder_id
                                         INNER JOIN groups g ON g.id = fg.group_id
@@ -607,8 +767,9 @@ class ShareProcessMessageHandler
                                  )
                                  ->fetchAllAssociative();
 
-        // Group by folder
-        $currentByFolder = $this->mapFolderRelations($currentRelations);
+        // Group by folder (split regular and private)
+        $currentByFolder = $this->mapFolderRelations($currentRelations, false); // Regular groups only
+        $currentPrivateByFolder = $this->mapFolderRelations($currentRelations, true); // Private groups only
         $metaByFolder = $this->buildFolderMetadata($currentRelations);
         $groupNames = $this->buildGroupNameMap($currentRelations, $requestedGroups);
 
@@ -684,6 +845,80 @@ class ShareProcessMessageHandler
                         $newRowPartial,
                         $partialByGroup
                     );
+                }
+
+                // Handle user permissions (private groups)
+                $currentPrivate = $currentPrivateByFolder[$folderId] ?? [];
+                if (!empty($requestedUserGroupIds) || !empty($partialUserGroupIds) || !empty($currentPrivate)) {
+                    $currentPrivateIds = array_keys($currentPrivate);
+
+                    // Exclude partial user groups from demotion - they should be left unchanged
+                    $toDemotePrivate = array_filter(
+                        array_diff($currentPrivateIds, $requestedUserGroupIds, $partialUserGroupIds),
+                        fn($gid) => !(
+                            ($currentPrivate[$gid]['partial'] ?? false) === true
+                            && ($currentPrivate[$gid]['can_write'] ?? false) === false
+                        ),
+                    );
+                    $toAddPrivate = array_diff($requestedUserGroupIds, $currentPrivateIds);
+                    $toKeepPrivate = array_intersect($currentPrivateIds, $requestedUserGroupIds);
+
+                    // Demote user group relations
+                    if (!empty($toDemotePrivate)) {
+                        $this->db()
+                             ->executeStatement(
+                                 "UPDATE folders_groups
+                                    SET partial = 1, can_write = 0, updated_by = :updatedBy
+                                    WHERE folder_id = :fid AND group_id IN (:gids)",
+                                 ['fid' => $folderId, 'gids' => $toDemotePrivate, 'updatedBy' => $userRow['email']],
+                                 ['gids' => ArrayParameterType::STRING]
+                             );
+                    }
+
+                    // Update kept user group relations
+                    foreach ($toKeepPrivate as $gid) {
+                        $newCW = $permByUserGroup[$gid] ?? $currentPrivate[$gid]['can_write'];
+                        $requestedPartial = $partialByUserGroup[$gid] ?? false;
+                        if ($requestedPartial) {
+                            continue;
+                        }
+                        $newPartial = ($partialByUserGroup[$gid] ?? false) || $newRowPartial;
+
+                        if ($newCW !== $currentPrivate[$gid]['can_write'] || $newPartial !== $currentPrivate[$gid]['partial']) {
+                            $this->db()->executeStatement(
+                                "UPDATE folders_groups
+                                 SET can_write = :canWrite, partial = :partial, updated_by = :updatedBy
+                                 WHERE folder_id = :fid AND group_id = :gid",
+                                [
+                                    'canWrite' => $newCW,
+                                    'partial' => $newPartial,
+                                    'updatedBy' => $userRow['email'],
+                                    'fid' => $folderId,
+                                    'gid' => $gid,
+                                ],
+                                [
+                                    'canWrite' => Types::BOOLEAN,
+                                    'partial' => Types::BOOLEAN,
+                                ]
+                            );
+                        }
+                    }
+
+                    // Add new user group relations
+                    $toAddPrivateFiltered = array_filter(
+                        $toAddPrivate,
+                        fn($gid) => !($partialByUserGroup[$gid] ?? false)
+                    );
+                    if (!empty($toAddPrivateFiltered)) {
+                        $this->bulkAddFolderGroups(
+                            $folderId,
+                            array_values($toAddPrivateFiltered),
+                            $permByUserGroup,
+                            $userRow['email'],
+                            $newRowPartial,
+                            $partialByUserGroup
+                        );
+                    }
                 }
 
                 $results[$folderId]['success'] = true;
@@ -1371,32 +1606,58 @@ class ShareProcessMessageHandler
     }
 
     /**
-     * Map password relations.
+     * Map password relations, optionally filtering by private/non-private groups.
      *
      * @param  array  $rows
+     * @param  bool|null  $privateOnly  null = all, true = private only, false = non-private only
      *
      * @return array
      */
-    private function mapPasswordRelations(array $rows): array
+    private function mapPasswordRelations(array $rows, ?bool $privateOnly = null): array
     {
         $map = [];
         foreach ($rows as $row) {
+            $isPrivate = (bool)($row['is_private'] ?? false);
+
+            // Filter based on privateOnly parameter
+            if (!is_null($privateOnly)) {
+                if ($privateOnly && !$isPrivate) {
+                    continue;
+                }
+                if (!$privateOnly && $isPrivate) {
+                    continue;
+                }
+            }
+
             $map[$row['password_id']][$row['group_id']] = (bool)$row['can_write'];
         }
         return $map;
     }
 
     /**
-     * Map folder relations.
+     * Map folder relations, optionally filtering by private/non-private groups.
      *
      * @param  array  $rows
+     * @param  bool|null  $privateOnly  null = all, true = private only, false = non-private only
      *
      * @return array
      */
-    private function mapFolderRelations(array $rows): array
+    private function mapFolderRelations(array $rows, ?bool $privateOnly = null): array
     {
         $map = [];
         foreach ($rows as $row) {
+            $isPrivate = (bool)($row['is_private'] ?? false);
+
+            // Filter based on privateOnly parameter
+            if (!is_null($privateOnly)) {
+                if ($privateOnly && !$isPrivate) {
+                    continue;
+                }
+                if (!$privateOnly && $isPrivate) {
+                    continue;
+                }
+            }
+
             $map[$row['folder_id']][$row['group_id']] = [
                 'can_write' => (bool)$row['can_write'],
                 'partial' => (bool)$row['partial'],

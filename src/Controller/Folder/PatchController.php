@@ -3,33 +3,43 @@
 /**
  * @author bsteffan
  * @since 2025-06-11
+ * @noinspection PhpMultipleClassDeclarationsInspection DateMalformedStringException
  */
 
 namespace App\Controller\Folder;
 
+use App\Controller\AbstractJsonPatchController;
 use App\Controller\Folder\Dto\PatchDto;
+use App\Controller\NulledValueGetterTrait;
 use App\Entity\Enums\FolderField;
 use App\Entity\Folder;
 use App\Entity\User;
+use App\Exception\InvalidRequestBodyException;
 use App\Normalizer\FolderNormalizer;
 use App\Repository\FolderRepository;
+use DateMalformedStringException;
 use Doctrine\ORM\EntityManagerInterface;
-use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Attribute\MapRequestPayload;
-use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Validator\ConstraintViolation;
 
-class PatchController extends AbstractController
+class PatchController extends AbstractJsonPatchController
 {
+    use NulledValueGetterTrait;
+
     /**
      * Update a folder.
      *
      * @param  string  $id
      * @param  PatchDto  $patchDto
+     * @param  Request  $request
      * @param  EntityManagerInterface  $entityManager
      *
      * @return JsonResponse
+     * @throws DateMalformedStringException
+     * @throws InvalidRequestBodyException
      */
     #[Route(
         "/folders/{id}",
@@ -40,6 +50,7 @@ class PatchController extends AbstractController
     public function index(
         string $id,
         #[MapRequestPayload] PatchDto $patchDto,
+        Request $request,
         EntityManagerInterface $entityManager
     ): JsonResponse {
         /** @var User $loggedInUser */
@@ -50,7 +61,7 @@ class PatchController extends AbstractController
         $folder = $folderRepository->findByIds(
             [$id],
             [
-                "PARTIAL f.{id, name, externalId, createdAt, createdBy, updatedAt, updatedBy}",
+                "PARTIAL f.{id, name, externalId, iconName, description, createdAt, createdBy, updatedAt, updatedBy}",
                 "PARTIAL fg.{folder, group, canWrite, partial}",
                 "PARTIAL g.{id, name, private}",
                 "PARTIAL v.{id, name, mandatoryFolderFields}",
@@ -68,28 +79,53 @@ class PatchController extends AbstractController
             throw $this->createAccessDeniedException("You don't have permission to update this folder.");
         }
 
-        $updated = false;
-        if (!is_null($patchDto->getName()) && $patchDto->getName() !== $folder->getName()) {
-            $folder->setName($patchDto->getName());
-            $updated = true;
-        }
+        $this->initializePatchData($request);
+        $this->addDefaultPatchData($folder, $patchDto);
+        $this->addExternalIdPatchData($folder, $patchDto->externalId);
 
-        if ($patchDto->getExternalId() !== false && $patchDto->getExternalId() !== $folder->getExternalId()) {
-            $mandatoryFolderFields = $folder->getVault()->getMandatoryFolderFields() ?? [];
-            if (is_null($patchDto->getExternalId()) && in_array(FolderField::ExternalId, $mandatoryFolderFields)) {
-                throw new BadRequestHttpException("ExternalId is mandatory for this vault.");
-            }
-
-            $folder->setExternalId($patchDto->getExternalId());
-            $updated = true;
-        }
-
-        if ($updated) {
+        if ($this->patch()) {
             $folder->setUpdatedBy($loggedInUser->getUserIdentifier());
-            $entityManager->persist($folder);
             $entityManager->flush();
         }
 
         return $this->json($folder, context: [FolderNormalizer::WITH_GROUPS]);
+    }
+
+    /**
+     * Add externalId to patch data if requested and valid.
+     *
+     * @param  Folder  $folder
+     * @param  string|null  $externalId
+     *
+     * @return void
+     */
+    private function addExternalIdPatchData(Folder $folder, ?string $externalId): void
+    {
+        if (!$this->isPatchRequested("externalId")) {
+            return;
+        }
+
+        $externalId = self::getTrimmedOrNull($externalId);
+        $mandatoryFolderFields = $folder->getVault()->getMandatoryFolderFields() ?? [];
+
+        if (is_null($externalId) && in_array(FolderField::ExternalId, $mandatoryFolderFields)) {
+            $violation = new ConstraintViolation(
+                "ExternalId is mandatory for this vault.",
+                null,
+                [],
+                $externalId,
+                "externalId",
+                $externalId
+            );
+            $this->addViolation($violation);
+            return;
+        }
+
+        $this->addPatchData(
+            "externalId",
+            $folder->getExternalId(),
+            $externalId,
+            [$folder, "setExternalId"]
+        );
     }
 }

@@ -176,6 +176,15 @@ paths:
                   description: External folder id
                   example: 123
                   nullable: true
+                iconName:
+                  type: string
+                  description: Icon name
+                  example: folder
+                description:
+                  type: string
+                  description: Folder description
+                  example: My folder description
+                  nullable: true
       responses:
         200:
           description: Folder updated Successfully
@@ -421,6 +430,56 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /folders/search:
+    get:
+      tags:
+        - Folders
+      summary: Search for folders
+      description: Search for folders
+      parameters:
+        - $ref: "#/components/parameters/search"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/limit"
+        - name: vaultId
+          in: query
+          required: false
+          description: Filter by vault id
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Folders response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/FolderMinimised"
+                        - type: object
+                          properties:
+                            externalId:
+                              type: string
+                              example: 123
+                              nullable: true
+                            vault:
+                              $ref: '#/components/schemas/VaultMinimised'
+                            folder:
+                              allOf:
+                                - $ref: '#/components/schemas/FolderMinimised'
+                                - nullable: true
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        400:
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /groups:
     get:
       tags:
@@ -1453,6 +1512,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /users/{id}/reset:
+    post:
+      tags:
+        - Users
+      summary: Reset a user to invited state
+      description: Reset user account, delete all associated data, and send new invitation email
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientEncryptedData'
+            example:
+              encryptedData: "QzZ3VnZxV1pKZFp1aHh0V1VqQkF1N1lrd0pFb3F1V2E"
+              clientPublicKey: "QzZ3VnZxV1pKZFp1aHh0V1VqQkF1N1lrd0pFb3F1V2E"
+              nonce: "QzZ3VnZxV1pKZFp1aHh0V1VqQkF1N1lrd0pFb3F1V2E"
+      responses:
+        204:
+          description: User successfully reset and invitation email sent
+        400:
+          description: Bad Request (user is not verified)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        401:
+          description: Authentication failed or invalid password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        403:
+          description: Access Denied (not admin or attempting to reset own account)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessDeniedErrorResponse'
+        404:
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /users/{id}/vaults:
     get:
       tags:
@@ -1485,10 +1589,10 @@ paths:
       tags:
         - Vaults
       summary: Create a new Vault
-      description: Create a new Vault
+      description: |
+        Create a new Vault. Requires at least one group OR at least two user permissions.
       requestBody:
         required: true
-        description: If groups are omitted from the request body, the groups from the parent resource will be used.
         content:
           application/json:
             schema:
@@ -1499,8 +1603,14 @@ paths:
                   example: My Vault
                 groups:
                   type: array
+                  description: Groups that have access to the vault (optional if 2+ userPermissions provided)
                   items:
                     $ref: "#/components/schemas/RequestGroupPermission"
+                userPermissions:
+                  type: array
+                  description: Users that have access to the vault (requires 2+ if no groups provided)
+                  items:
+                    $ref: "#/components/schemas/RequestUserPermission"
                 mandatoryFolderFields:
                   type: array
                   items:
@@ -1517,6 +1627,10 @@ paths:
                   type: string
                   example: "folder"
                   description: Can be any material icon from google fonts
+                description:
+                  type: string
+                  example: "My vault description"
+                  nullable: true
                 allowPasswordsAtRoot:
                   type: boolean
                   example: true
@@ -1529,7 +1643,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VaultMinimisedWithGroupsWithMandatoryFields'
+                $ref: '#/components/schemas/VaultWithGroupsWithMandatoryFields'
         400:
           description: Bad Request
           content:
@@ -1562,7 +1676,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VaultMinimisedWithGroupsWithMandatoryFields'
+                $ref: '#/components/schemas/VaultWithGroupsWithMandatoryFields'
         401:
           description: Authentication failed
           content:
@@ -1616,6 +1730,10 @@ paths:
                   type: string
                   example: "folder"
                   description: Can be any material icon from google fonts
+                description:
+                  type: string
+                  example: "My vault description"
+                  nullable: true
                 allowPasswordsAtRoot:
                   type: boolean
                   example: true
@@ -1628,7 +1746,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VaultMinimisedWithGroupsWithMandatoryFields'
+                $ref: '#/components/schemas/VaultWithGroupsWithMandatoryFields'
         400:
           description: Bad Request
           content:
@@ -2223,6 +2341,31 @@ components:
           type: boolean
           description: Indicates if passwords can be stored at the root level
           example: false
+    Vault:
+      allOf:
+        - $ref: '#/components/schemas/VaultMinimised'
+        - type: object
+          properties:
+            description:
+              type: string
+              description: Description of the vault
+              example: "Vault for development"
+        - $ref: '#/components/schemas/EditorFields'
+    VaultWithGroups:
+      allOf:
+        - $ref: '#/components/schemas/Vault'
+        - type: object
+          properties:
+            groups:
+              type: array
+              description: Groups that have access to the vault
+              items:
+                $ref: "#/components/schemas/ResponseGroupPermissionWithPartial"
+            users:
+              type: array
+              description: Users that have access to the vault
+              items:
+                $ref: "#/components/schemas/ResponseUserPermissionWithPartial"
     VaultMinimisedWithGroups:
       allOf:
         - $ref: '#/components/schemas/VaultMinimised'
@@ -2236,6 +2379,27 @@ components:
     VaultMinimisedWithGroupsWithMandatoryFields:
       allOf:
         - $ref: '#/components/schemas/VaultMinimisedWithGroups'
+        - type: object
+          properties:
+            mandatoryFolderFields:
+              type: array
+              description: Mandatory fields for folders in this vault
+              items:
+                type: string
+                enum: [external_id]
+              nullable: true
+              example: [external_id]
+            mandatoryPasswordFields:
+              type: array
+              description: Mandatory fields for passwords in this vault
+              items:
+                type: string
+                enum: [external_id, target, location]
+              nullable: true
+              example: [external_id, target]
+    VaultWithGroupsWithMandatoryFields:
+      allOf:
+        - $ref: '#/components/schemas/VaultWithGroups'
         - type: object
           properties:
             mandatoryFolderFields:
@@ -2304,7 +2468,7 @@ components:
               nullable: true
             metadata:
               type: string
-              description: Metadat to identify the affected resource
+              description: Metadata to identify the affected resource
               example: Password-123[example.com]
     Changelog:
       type: object
@@ -2395,6 +2559,10 @@ components:
           type: string
           description: Name of the folder
           example: Development
+        iconName:
+          type: string
+          description: Name of the folder icon
+          example: "folder"
     Folder:
       allOf:
         - $ref: '#/components/schemas/FolderMinimised'
@@ -2405,6 +2573,12 @@ components:
               type: string
               description: External Id of the folder
               example: 123
+              nullable: true
+            description:
+              type: string
+              description: Description of the folder
+              example: Development folder
+              nullable: true
     FolderWithGroups:
       allOf:
         - $ref: '#/components/schemas/Folder'
@@ -2415,6 +2589,11 @@ components:
               description: Groups that have access to the folder
               items:
                 $ref: "#/components/schemas/ResponseGroupPermissionWithPartial"
+            users:
+              type: array
+              description: Users that have access to the folder
+              items:
+                $ref: "#/components/schemas/ResponseUserPermissionWithPartial"
     ResponseGroupPermission:
       type: object
       properties:
@@ -2455,6 +2634,46 @@ components:
               type: boolean
               description: Does the group see only part of the resources in this resource(cannot be manually overridden)
               example: false
+    RequestUserPermission:
+      type: object
+      properties:
+        userId:
+          $ref: '#/components/schemas/Id'
+        canWrite:
+          type: boolean
+          description: Can the user write to this resource
+          example: true
+    RequestUserPermissionWithPartial:
+      allOf:
+        - $ref: '#/components/schemas/RequestUserPermission'
+        - type: object
+          properties:
+            partial:
+              type: boolean
+              description: Does the user see only part of the resources in this resource
+              example: false
+    ResponseUserPermission:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        username:
+          type: string
+          description: Username of the user
+          example: john.doe
+        canWrite:
+          type: boolean
+          description: Can the user write to this resource
+          example: true
+    ResponseUserPermissionWithPartial:
+      allOf:
+        - $ref: '#/components/schemas/ResponseUserPermission'
+        - type: object
+          properties:
+            partial:
+              type: boolean
+              description: Does the user see only part of the resources in this resource
+              example: false
     CreateFolderRequest:
       type: object
       properties:
@@ -2471,11 +2690,26 @@ components:
           description: External Id of the folder
           example: 123
           nullable: true
+        iconName:
+          type: string
+          description: Icon of the folder
+          example: folder
+          default: folder
+        description:
+          type: string
+          description: Description of the folder
+          example: Development folder
+          nullable: true
         groups:
           type: array
           description: Groups that have access to the folder
           items:
             $ref: "#/components/schemas/RequestGroupPermission"
+        userPermissions:
+          type: array
+          description: Users that have access to the folder
+          items:
+            $ref: "#/components/schemas/RequestUserPermission"
       required:
         - name
         - vaultId
@@ -2523,6 +2757,11 @@ components:
               description: Groups that have access to the password
               items:
                 $ref: "#/components/schemas/ResponseGroupPermission"
+            users:
+              type: array
+              description: Users that have access to the password
+              items:
+                $ref: "#/components/schemas/ResponseUserPermission"
     PasswordWithFolderWithGroups:
       allOf:
         - $ref: '#/components/schemas/PasswordWithGroups'
@@ -2550,13 +2789,16 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RequestGroupPermissionWithPartial"
+        userPermissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/RequestUserPermissionWithPartial"
         cascade:
           type: boolean
           default: false
           description: Set to true to apply the permissions to all sub resources
       required:
         - encryptedPassword
-        - groups
     PatchPermissions:
       type: object
       properties:
@@ -2566,9 +2808,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RequestGroupPermission"
+        userPermissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/RequestUserPermission"
       required:
         - encryptedPassword
-        - groups
     ShareProcessMinimised:
       type: object
       properties:
@@ -2603,6 +2848,22 @@ components:
                     type: string
                     description: Name of the group
                     example: Administrators
+        requestedUsers:
+          type: array
+          nullable: true
+          items:
+            allOf:
+              - $ref: '#/components/schemas/RequestUserPermissionWithPartial'
+              - type: object
+                properties:
+                  username:
+                    type: string
+                    description: Username of the user
+                    example: john.doe
+                  email:
+                    type: string
+                    description: Email of the user
+                    example: john.doe@example.com
         status:
           type: string
           description: Status of the share
@@ -2681,6 +2942,11 @@ components:
           description: Groups that have access to the password
           items:
             $ref: "#/components/schemas/RequestGroupPermission"
+        userPermissions:
+          type: array
+          description: Users that have access to the password
+          items:
+            $ref: "#/components/schemas/RequestUserPermission"
       required:
         - title
         - encryptedPassword

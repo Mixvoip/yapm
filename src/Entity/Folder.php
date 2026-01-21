@@ -32,6 +32,12 @@ class Folder extends DeletableEntity implements AuditableEntityInterface, Permis
     #[ORM\Column(type: "ascii_string", length: 255, nullable: true, options: ['default' => null])]
     private ?string $externalId = null;
 
+    #[ORM\Column(type: "string", length: 255, nullable: false, options: ['default' => 'folder'])]
+    private string $iconName = 'folder';
+
+    #[ORM\Column(type: "text", nullable: true, options: ['default' => null])]
+    private ?string $description = null;
+
     #[ORM\ManyToOne(targetEntity: Vault::class, inversedBy: "folders")]
     private Vault $vault;
 
@@ -111,6 +117,44 @@ class Folder extends DeletableEntity implements AuditableEntityInterface, Permis
     public function setExternalId(?string $externalId): Folder
     {
         $this->externalId = $externalId;
+        return $this;
+    }
+
+    /**
+     * @return string
+     */
+    public function getIconName(): string
+    {
+        return $this->iconName;
+    }
+
+    /**
+     * @param  string  $iconName
+     *
+     * @return Folder
+     */
+    public function setIconName(string $iconName): Folder
+    {
+        $this->iconName = $iconName;
+        return $this;
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getDescription(): ?string
+    {
+        return $this->description;
+    }
+
+    /**
+     * @param  string|null  $description
+     *
+     * @return Folder
+     */
+    public function setDescription(?string $description): Folder
+    {
+        $this->description = $description;
         return $this;
     }
 
@@ -287,6 +331,7 @@ class Folder extends DeletableEntity implements AuditableEntityInterface, Permis
             $folderMap[] = [
                 'id' => $folder->getId(),
                 'name' => $folder->getName(),
+                'iconName' => $folder->getIconName(),
                 'parentId' => $folder->getParent()?->getId() ?? null,
             ];
         }
@@ -303,6 +348,7 @@ class Folder extends DeletableEntity implements AuditableEntityInterface, Permis
             'folder' => [
                 'id' => $this->id,
                 'name' => $this->name,
+                'iconName' => $this->iconName,
                 'parentId' => $this->parent?->getId() ?? null,
             ],
             'folders' => $folderMap,

@@ -98,6 +98,7 @@ class PasswordRepository extends ServiceEntityRepository
 
     /**
      * Find all passwords for a folder id and group ids.
+     * Access control is done via EXISTS subquery to ensure all groups are loaded for each password.
      *
      * @param  string  $folderId
      * @param  string[]  $groupIds
@@ -121,9 +122,14 @@ class PasswordRepository extends ServiceEntityRepository
                     ->innerJoin("$alias.groupPasswords", $groupsPasswordAlias)
                     ->innerJoin("$groupsPasswordAlias.group", $groupAlias)
                     ->where("$alias.folder = :folderId")
-                    ->andWhere("$groupAlias.id IN (:groupIds)")
+                    ->andWhere(
+                        "EXISTS (SELECT 1 FROM App\Entity\GroupsPassword gp_access
+                                 WHERE gp_access.password = $alias
+                                 AND gp_access.group IN (:groupIds))"
+                    )
                     ->setParameter('folderId', $folderId)
                     ->setParameter('groupIds', $groupIds)
+                    ->orderBy("$alias.title")
                     ->getQuery()
                     ->getResult();
     }
@@ -134,13 +140,18 @@ class PasswordRepository extends ServiceEntityRepository
      * @param  string  $search
      * @param  string  $vaultId
      * @param  string[]  $groupIds
-     * @param  int  $page
+     * @param  int  $firstResult
      * @param  int  $limit
      *
      * @return Password[]
      */
-    public function searchPasswords(string $search, string $vaultId, array $groupIds, int $page, int $limit): array
-    {
+    public function searchPasswords(
+        string $search,
+        string $vaultId,
+        array $groupIds,
+        int $firstResult,
+        int $limit
+    ): array {
         $qb = $this->createQueryBuilder('p')
                    ->select("PARTIAL p.{id, title, target, externalId}", "PARTIAL v.{id, name}", "PARTIAL f.{id, name}")
                    ->innerJoin('p.vault', "v")
@@ -151,7 +162,7 @@ class PasswordRepository extends ServiceEntityRepository
                    ->setParameter('groupIds', $groupIds)
                    ->groupBy('p.id')
                    ->orderBy('p.id')
-                   ->setFirstResult(($page - 1) * $limit)
+                   ->setFirstResult($firstResult)
                    ->setMaxResults($limit);
 
         if ($search !== "") {
@@ -159,13 +170,12 @@ class PasswordRepository extends ServiceEntityRepository
                 $qb->andWhere("p.externalId = :exactSearch");
             } else {
                 $orX = $qb->expr()->orX(
-                    "p.title LIKE :search",
-                    "p.description LIKE :search",
+                    "p.title LIKE :vagueSearch",
+                    "p.description LIKE :vagueSearch",
                     "p.target LIKE :vagueSearch",
                     "p.externalId LIKE :exactSearch",
                 );
                 $qb->andWhere($orX)
-                   ->setParameter('search', "$search%")
                    ->setParameter('vagueSearch', "%$search%");
             }
 

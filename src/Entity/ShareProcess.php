@@ -37,6 +37,9 @@ class ShareProcess
     #[ORM\Column(type: Types::JSON)]
     private array $requestedGroups = [];
 
+    #[ORM\Column(type: Types::JSON, nullable: true)]
+    private ?array $requestedUsers = null;
+
     #[ORM\Column(type: Types::STRING, enumType: Status::class, options: ['default' => Status::Pending])]
     private Status $status = Status::Pending;
 
@@ -184,6 +187,25 @@ class ShareProcess
     public function setRequestedGroups(array $requestedGroups): ShareProcess
     {
         $this->requestedGroups = $requestedGroups;
+        return $this;
+    }
+
+    /**
+     * @return array|null
+     */
+    public function getRequestedUsers(): ?array
+    {
+        return $this->requestedUsers;
+    }
+
+    /**
+     * @param  array|null  $requestedUsers
+     *
+     * @return ShareProcess
+     */
+    public function setRequestedUsers(?array $requestedUsers): ShareProcess
+    {
+        $this->requestedUsers = $requestedUsers;
         return $this;
     }
 

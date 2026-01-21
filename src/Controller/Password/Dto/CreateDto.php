@@ -9,6 +9,7 @@ namespace App\Controller\Password\Dto;
 
 use App\Controller\Dto\EncryptedClientDataDto;
 use App\Controller\Dto\GroupPermissionDto;
+use App\Controller\Dto\UserPermissionDto;
 use Symfony\Component\Validator\Constraints as Assert;
 
 readonly class CreateDto
@@ -24,6 +25,7 @@ readonly class CreateDto
      * @param  string|null  $externalId
      * @param  string|null  $folderId
      * @param  GroupPermissionDto[]  $groups
+     * @param  UserPermissionDto[]  $userPermissions
      */
     public function __construct(
         #[
@@ -81,7 +83,16 @@ readonly class CreateDto
                 new Assert\Type(GroupPermissionDto::class),
             ])
         ]
-        private array $groups = []
+        private array $groups = [],
+
+        #[
+            Assert\Type('array'),
+            Assert\Valid,
+            Assert\All([
+                new Assert\Type(UserPermissionDto::class),
+            ])
+        ]
+        private array $userPermissions = []
     ) {
     }
 
@@ -179,5 +190,13 @@ readonly class CreateDto
     public function getGroups(): array
     {
         return $this->groups;
+    }
+
+    /**
+     * @return UserPermissionDto[]
+     */
+    public function getUserPermissions(): array
+    {
+        return $this->userPermissions;
     }
 }

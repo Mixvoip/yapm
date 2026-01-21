@@ -8,8 +8,8 @@
 
 namespace App\Controller;
 
-use App\Service\Attributes\PatchConfiguration;
-use App\Service\Attributes\PatchExclude;
+use App\Exception\InvalidRequestBodyException;
+use App\Service\Attributes\DefaultPatchConfiguration;
 use DateMalformedStringException;
 use DateTimeImmutable;
 use ReflectionClass;
@@ -18,8 +18,10 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Validator\Constraints as Assert;
 
-class AbstractJsonPatchController extends AbstractController
+abstract class AbstractJsonPatchController extends AbstractController
 {
+    use ViolationHandlerTrait;
+
     private array $requestData = [];
     private array $patchData = [];
 
@@ -90,22 +92,18 @@ class AbstractJsonPatchController extends AbstractController
                 $attributes[$attribute->getName()] = $attribute->newInstance();
             }
 
-            if (isset($attributes[PatchExclude::class])) {
-                continue;
-            }
+            $value = $dto->$name;
 
-            if (isset($attributes[PatchConfiguration::class])) {
-                $attribute = $attributes[PatchConfiguration::class];
-                $getter = $attribute->getGetter();
+            if (isset($attributes[DefaultPatchConfiguration::class])) {
+                /** @var DefaultPatchConfiguration $attribute */
+                $attribute = $attributes[DefaultPatchConfiguration::class];
+                if ($attribute->isIgnore()) {
+                    continue;
+                }
 
-                $this->addPatchData(
-                    $name,
-                    $patchObject->$getter(),
-                    $dto->$name,
-                    [$patchObject, $attribute->getSetter()]
-                );
-
-                continue;
+                if (!is_null($attribute->getNormalizer())) {
+                    $value = $attribute->getNormalizer()($value);
+                }
             }
 
             $setter = "set" . ucfirst($name);
@@ -127,7 +125,6 @@ class AbstractJsonPatchController extends AbstractController
                 throw new RuntimeException("Unable to guess a getter for '$name' in " . $patchObject::class . ".");
             }
 
-            $value = $dto->$name;
             if (
                 is_string($value)
                 && (
@@ -150,10 +147,17 @@ class AbstractJsonPatchController extends AbstractController
     /**
      * Patch values and return whether something was updated.
      *
+     * @param  bool  $throwViolations
+     *
      * @return bool
+     * @throws InvalidRequestBodyException
      */
-    protected function patch(): bool
+    protected function patch(bool $throwViolations = true): bool
     {
+        if ($throwViolations) {
+            $this->throwViolations();
+        }
+
         $patched = false;
         foreach ($this->patchData as $key => $patch) {
             if (!$this->isPatchRequested($key)) {

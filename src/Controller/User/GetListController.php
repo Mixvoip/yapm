@@ -33,10 +33,7 @@ class GetListController extends AbstractController
         /** @var User $loggedInUser */
         $loggedInUser = $this->getUser();
 
-        if (
-            !$loggedInUser->isAdmin()
-            && ($displayType !== DisplayType::List || empty($loggedInUser->getManagedGroupIds()))
-        ) {
+        if (!$loggedInUser->isAdmin() && $displayType !== DisplayType::List) {
             throw $this->createAccessDeniedException();
         }
 

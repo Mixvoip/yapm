@@ -80,7 +80,7 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
             [
                 "PARTIAL f.{id, name, externalId, updatedAt, updatedBy}",
                 "PARTIAL fg.{folder, group, canWrite, partial}",
-                "PARTIAL g.{id, name, publicKey}",
+                "PARTIAL g.{id, name, publicKey, private}",
                 "PARTIAL v.{id, name}",
             ],
             groupAlias: 'g',
@@ -100,7 +100,17 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
             throw $this->createAccessDeniedException("You don't have permission to update this folder.");
         }
 
+        // Validate at least one permission is provided
+        $this->assertAtLeastOnePermission($dto->groups, $dto->userPermissions);
+
         [$requested, $requestedGroupIds, $groups] = $this->resolveAndValidateGroups($dto, $entityManager);
+        [$requestedUserPerms, $privateGroups, $userIdToGroupId] = $this->resolveAndValidateUserPermissions(
+            $dto,
+            $entityManager
+        );
+
+        // Enforce at least one group or user with write access
+        $this->assertAtLeastOneWriteAccess($requested, $requestedUserPerms);
 
         try {
             $this->decryptUserPrivateKey($dto->encryptedPassword);
@@ -117,7 +127,14 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
         $userIdentifier = $loggedInUser->getUserIdentifier();
         $fullWrite = $folder->hasFullWritePermission($groupIds);
         $groupNames = $this->buildMergedGroupNameMap($folder, $groups);
-        [$current, $target] = $this->buildSnapShots($folder, $requested, $fullWrite);
+
+        // Calculate hasChildren efficiently - only relevant when not cascading
+        $hasChildren = false;
+        if (!$dto->cascade) {
+            $hasChildren = $this->folderHasChildren($folder->getId(), $entityManager);
+        }
+
+        [$current, $target] = $this->buildSnapShots($folder, $requested, $fullWrite, $hasChildren);
         $isNoOp = $current === $target;
 
         if ($isNoOp && !$dto->cascade) {
@@ -127,18 +144,33 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
 
         $diff = [];
         if (!$isNoOp) {
-            // Update FolderGroup relations for this folder.
-            $this->updateFolderGroupRelations(
+            // Update FolderGroup relations for this folder (regular groups only).
+            $this->updateFolderGroupPermissions(
                 $folder,
                 $groups,
-                $requestedGroupIds,
                 $requested,
                 $userIdentifier,
                 $entityManager,
-                $fullWrite
+                $fullWrite,
+                forPrivateGroups: false,
+                hasChildren: $hasChildren
             );
 
             $diff = $this->diffPermissions($current, $target, $groupNames);
+        }
+
+        // Update private group relations (user permissions) for this folder
+        if (!empty($requestedUserPerms)) {
+            $this->updateFolderGroupPermissions(
+                $folder,
+                $privateGroups,
+                $requestedUserPerms,
+                $userIdentifier,
+                $entityManager,
+                $fullWrite,
+                forPrivateGroups: true,
+                hasChildren: $hasChildren
+            );
         }
 
         $clientIp = AuditService::getClientIp($request);
@@ -157,7 +189,15 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
         }
 
         // Create ShareProcess and dispatch message
-        $process = $this->buildShareProcess(ProcessTargetType::Folder, $folder, $dto, $groups, $userIdentifier);
+        $process = $this->buildShareProcess(
+            ProcessTargetType::Folder,
+            $folder,
+            $dto,
+            $groups,
+            $privateGroups,
+            $userIdToGroupId,
+            $userIdentifier
+        );
         $entityManager->persist($process);
         $entityManager->flush();
         $bus->dispatch(new ShareProcessMessage($process->getId(), $dto->encryptedPassword, $clientIp, $userAgent));
@@ -166,65 +206,78 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
     }
 
     /**
-     * Update FolderGroup explicit relations for a folder to match the requested group ids.
+     * Update FolderGroup relations for a folder.
+     * Handles both regular groups (isPrivate=false) and private groups (user permissions, isPrivate=true).
      *
      * @param  Folder  $folder
-     * @param  Group[]  $groups
-     * @param  array  $requestedGroupIds
-     * @param  array  $requested
+     * @param  Group[]  $groups  Groups to update (keyed by ID for $requested lookup)
+     * @param  array  $requested  Requested permissions keyed by group ID ['canWrite' => bool, 'partial' => bool]
      * @param  string  $userIdentifier
      * @param  EntityManagerInterface  $entityManager
      * @param  bool  $fullWrite
+     * @param  bool  $forPrivateGroups  True to process private groups, false to process regular groups
+     * @param  bool  $hasChildren  Whether folder has children (cascade=false + hasChildren = partial)
      *
      * @return void
      */
-    private function updateFolderGroupRelations(
+    private function updateFolderGroupPermissions(
         Folder $folder,
         array $groups,
-        array $requestedGroupIds,
         array $requested,
         string $userIdentifier,
         EntityManagerInterface $entityManager,
-        bool $fullWrite
+        bool $fullWrite,
+        bool $forPrivateGroups,
+        bool $hasChildren = false
     ): void {
-        // Map current
+        // Map current groups (filter by private flag)
         $currentMap = [];
         foreach ($folder->getFolderGroups() as $fg) {
+            $isPrivate = $fg->getGroup()->isPrivate();
+            if ($forPrivateGroups !== $isPrivate) {
+                continue;
+            }
             $currentMap[$fg->getGroup()->getId()] = $fg;
         }
         $currentIds = array_keys($currentMap);
+        $requestedIds = array_keys($requested);
 
-        $toRemove = array_diff($currentIds, $requestedGroupIds);
-        $toAdd = array_diff($requestedGroupIds, $currentIds);
-        $toKeep = array_intersect($currentIds, $requestedGroupIds);
+        $toRemove = array_diff($currentIds, $requestedIds);
+        $toAdd = array_diff($requestedIds, $currentIds);
+        $toKeep = array_intersect($currentIds, $requestedIds);
 
         $groupsById = [];
         foreach ($groups as $group) {
             $groupsById[$group->getId()] = $group;
         }
 
-        $addedGroups = [];
         // Add new relations
+        $addedGroups = [];
         foreach ($toAdd as $gid) {
+            if (!isset($groupsById[$gid])) {
+                continue;
+            }
             $group = $groupsById[$gid];
             $groupPermission = $requested[$gid];
-            $requestedPartial = $groupPermission['partial'];
+            $requestedPartial = $groupPermission['partial'] ?? false;
             if ($requestedPartial) {
                 continue;
             }
-            $partial = $groupPermission['partial'] || !$fullWrite;
+            $partial = $requestedPartial || !$fullWrite || $hasChildren;
 
-            $fg = new FoldersGroup()->setFolder($folder)
-                                    ->setGroup($group)
-                                    ->setCanWrite($groupPermission['canWrite'])
-                                    ->setPartial($partial)
-                                    ->setCreatedBy($userIdentifier);
+            $fg = new FoldersGroup();
+            $fg->setFolder($folder)
+               ->setGroup($group)
+               ->setCanWrite($groupPermission['canWrite'])
+               ->setPartial($partial)
+               ->setCreatedBy($userIdentifier);
 
             $folder->addFolderGroup($fg);
             $entityManager->persist($fg);
             $addedGroups[] = $group;
         }
 
+        // Propagate added groups to parent folder and vault
         if (!empty($addedGroups)) {
             $parent = $folder->getParent();
             if (!is_null($parent)) {
@@ -234,16 +287,17 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
             $this->addMissingGroupsToVault($folder->getVault(), $addedGroups, $userIdentifier, $entityManager);
         }
 
+        // Update kept relations
         foreach ($toKeep as $gid) {
             /** @var FoldersGroup $fg */
             $fg = $currentMap[$gid];
             $groupPermission = $requested[$gid];
             $newCanWrite = $groupPermission['canWrite'];
-            $requestedPartial = $groupPermission['partial'];
+            $requestedPartial = $groupPermission['partial'] ?? false;
             if ($requestedPartial) {
                 continue;
             }
-            $newPartial = $groupPermission['partial'] || !$fullWrite;
+            $newPartial = $requestedPartial || !$fullWrite || $hasChildren;
 
             if ($fg->canWrite() !== $newCanWrite || $fg->isPartial() !== $newPartial) {
                 $fg->setCanWrite($newCanWrite)
@@ -252,7 +306,7 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
             }
         }
 
-        // Demote omitted relations
+        // Demote removed relations
         $demotedGroupIds = [];
         foreach ($toRemove as $gid) {
             /** @var FoldersGroup $fg */
@@ -268,6 +322,7 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
             $demotedGroupIds[] = $gid;
         }
 
+        // Mark parent as partial for demoted groups
         if (!empty($demotedGroupIds)) {
             $parent = $folder->getParent();
             if (!is_null($parent)) {
@@ -276,5 +331,34 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
 
             $this->markVaultAsPartial($folder->getVault(), $demotedGroupIds, $userIdentifier, $entityManager);
         }
+    }
+
+    /**
+     * Check if a folder has children (child folders or passwords).
+     * Uses direct SQL queries for efficiency to avoid loading collections.
+     *
+     * @param  string  $folderId
+     * @param  EntityManagerInterface  $entityManager
+     *
+     * @return bool
+     */
+    private function folderHasChildren(string $folderId, EntityManagerInterface $entityManager): bool
+    {
+        $conn = $entityManager->getConnection();
+
+        // Check for child folders
+        $hasChildFolders = $conn->fetchOne(
+            "SELECT 1 FROM folders WHERE parent_folder_id = :fid AND deleted_at IS NULL LIMIT 1",
+            ['fid' => $folderId]
+        );
+        if ($hasChildFolders) {
+            return true;
+        }
+
+        // Check for passwords
+        return (bool)$conn->fetchOne(
+            "SELECT 1 FROM passwords WHERE folder_id = :fid AND deleted_at IS NULL LIMIT 1",
+            ['fid' => $folderId]
+        );
     }
 }

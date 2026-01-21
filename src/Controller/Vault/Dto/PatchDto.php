@@ -7,47 +7,54 @@
 
 namespace App\Controller\Vault\Dto;
 
+use App\Controller\NulledValueGetterTrait;
 use App\Entity\Enums\FolderField;
 use App\Entity\Enums\PasswordField;
+use App\Service\Attributes\DefaultPatchConfiguration;
 use Symfony\Component\Validator\Constraints as Assert;
 
-class PatchDto
+readonly class PatchDto
 {
+    use NulledValueGetterTrait;
+
     /**
      * @param  string  $name
      * @param  FolderField[]|null  $mandatoryFolderFields
      * @param  PasswordField[]|null  $mandatoryPasswordFields
      * @param  string  $iconName
      * @param  bool  $allowPasswordsAtRoot
+     * @param  string|null  $description
      */
     public function __construct(
         #[
             Assert\NotBlank(normalizer: "trim"),
             Assert\Length(min: 1, max: 255),
         ]
-        public readonly string $name = "a",
+        public string $name = "a",
 
-        #[Assert\All(
-            new Assert\Choice(callback: [FolderField::class, "cases"]),
-        )]
+        #[
+            Assert\All(
+                new Assert\Choice(callback: [FolderField::class, "cases"]),
+            ),
+            DefaultPatchConfiguration(normalizer: [self::class, "getArrayOrNull"])
+        ]
         public ?array $mandatoryFolderFields = null,
 
-        #[Assert\All(
-            new Assert\Choice(callback: [PasswordField::class, "cases"]),
-        )]
+        #[
+            Assert\All(
+                new Assert\Choice(callback: [PasswordField::class, "cases"]),
+            ),
+            DefaultPatchConfiguration(normalizer: [self::class, "getArrayOrNull"])
+        ]
         public ?array $mandatoryPasswordFields = null,
 
         #[Assert\NotBlank(normalizer: "trim")]
-        public readonly string $iconName = "a",
+        public string $iconName = "a",
 
-        public readonly bool $allowPasswordsAtRoot = false
+        public bool $allowPasswordsAtRoot = false,
+
+        #[DefaultPatchConfiguration(normalizer: [self::class, "getTrimmedOrNull"])]
+        public ?string $description = null
     ) {
-        if ($this->mandatoryFolderFields === []) {
-            $this->mandatoryFolderFields = null;
-        }
-
-        if ($this->mandatoryPasswordFields === []) {
-            $this->mandatoryPasswordFields = null;
-        }
     }
 }

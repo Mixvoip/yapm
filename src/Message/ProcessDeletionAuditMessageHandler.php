@@ -18,7 +18,7 @@ use InvalidArgumentException;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Component\Uid\Uuid;
 
-#[AsMessageHandler]
+#[AsMessageHandler(sign: true)]
 class ProcessDeletionAuditMessageHandler
 {
     private const int BATCH_SIZE = 100;

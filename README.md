@@ -1,6 +1,6 @@
 # Yet Another Password Manager (YAPM)
 
-A secure, self-hosted password manager built with Symfony 7.3 and PHP 8.4, featuring end-to-end encryption, group-based access control, and a RESTful API.
+A secure, self-hosted password manager built with Symfony 7.4 and PHP 8.4, featuring end-to-end encryption, group-based access control, and a RESTful API.
 
 ## Table of contents
 

@@ -54,6 +54,7 @@ class DevelopmentVaultFixtures extends Fixture implements DependentFixtureInterf
         $devVault = new Vault()->setId("1aaaaaaa-bbbb-cccc-dddd-000000000000")
                                ->setName("Development")
                                ->setIconName("code")
+                               ->setDescription("This vault contains development passwords")
                                ->setCreatedBy('fixtures');
         $manager->persist($devVault);
 
@@ -78,11 +79,15 @@ class DevelopmentVaultFixtures extends Fixture implements DependentFixtureInterf
                                        ->setCreatedBy('fixtures');
 
         $main = (clone $folderPrototype)->setId('aaaaaaaa-bbbb-cccc-dddd-fd0000000000')
-                                        ->setName('main');
+                                        ->setName('main')
+                                        ->setDescription("This folder holds the main database passwords")
+                                        ->setIconName("folder_shared");
         $manager->persist($main);
 
         $prod = (clone $folderPrototype)->setId('aaaaaaaa-bbbb-cccc-dddd-fd0000000001')
                                         ->setName('prod')
+                                        ->setDescription("This folder holds the production database passwords")
+                                        ->setIconName("folder_special")
                                         ->setParent($main);
         $manager->persist($prod);
 
@@ -97,6 +102,8 @@ class DevelopmentVaultFixtures extends Fixture implements DependentFixtureInterf
 
         $yapm = (clone $folderPrototype)->setId('aaaaaaaa-bbbb-cccc-dddd-fd0000000004')
                                         ->setName('yapm')
+                                        ->setDescription("This folder holds the YAPM database passwords")
+                                        ->setIconName("folder_zip")
                                         ->setParent($nexus);
         $manager->persist($yapm);
 

@@ -7,7 +7,6 @@
 
 namespace App\Normalizer;
 
-use App\Entity\GroupsVault;
 use App\Entity\Vault;
 use JetBrains\PhpStorm\ArrayShape;
 use Symfony\Component\Serializer\Normalizer\NormalizerAwareInterface;
@@ -56,21 +55,38 @@ class VaultNormalizer implements NormalizerInterface, NormalizerAwareInterface
         ];
 
         if (in_array(self::WITH_GROUPS, $context)) {
-            $normalised['groups'] = array_values(
-                array_map(
-                    function (GroupsVault $groupVault) {
-                        $group = $groupVault->getGroup();
+            $groups = [];
+            $userShares = [];
 
-                        return [
-                            'id' => $group->getId(),
-                            'name' => $group->getName(),
+            foreach ($data->getGroupVaults() as $groupVault) {
+                $group = $groupVault->getGroup();
+
+                if ($group->isPrivate()) {
+                    // This is a user share - get the user from the group
+                    $groupUser = $group->getGroupUsers()->first();
+                    if ($groupUser) {
+                        $user = $groupUser->getUser();
+                        $userShares[] = [
+                            'id' => $user->getId(),
+                            'email' => $user->getEmail(),
+                            'username' => $user->getUsername(),
                             'canWrite' => $groupVault->canWrite(),
                             'partial' => $groupVault->isPartial(),
                         ];
-                    },
-                    $data->getGroupVaults()->toArray(),
-                )
-            );
+                    }
+                } else {
+                    // Regular group
+                    $groups[] = [
+                        'id' => $group->getId(),
+                        'name' => $group->getName(),
+                        'canWrite' => $groupVault->canWrite(),
+                        'partial' => $groupVault->isPartial(),
+                    ];
+                }
+            }
+
+            $normalised['groups'] = $groups;
+            $normalised['users'] = $userShares;
         }
 
         if (in_array(self::WITH_MANDATORY_FIELDS, $context)) {
@@ -96,6 +112,8 @@ class VaultNormalizer implements NormalizerInterface, NormalizerAwareInterface
         if (in_array(self::MINIMISED, $context)) {
             return $normalised;
         }
+
+        $normalised['description'] = $data->getDescription();
 
         return array_merge($normalised, $this->normalizeMetadata($data));
     }
