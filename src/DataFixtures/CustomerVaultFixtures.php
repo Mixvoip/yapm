@@ -89,6 +89,7 @@ class CustomerVaultFixtures extends Fixture implements DependentFixtureInterface
                             ->setMandatoryPasswordFields([PasswordField::Location])
                             ->setIconName("people")
                             ->setAllowPasswordsAtRoot(false)
+                            ->setDescription("This is the vault for all customer related passwords.")
                             ->setCreatedBy('fixtures');
         $manager->persist($vault);
 

@@ -50,7 +50,7 @@ class SearchController extends AbstractController
             $search,
             $vaultId,
             $loggedInUser->getGroupIds(),
-            $page,
+            ($page - 1) * $limit,
             $limit + 1 // Fetch limit +1 to check for the next page
         );
 

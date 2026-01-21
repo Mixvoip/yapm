@@ -44,7 +44,7 @@ class GetStructureController extends AbstractController
         $folder = $folderRepository->findByIds(
             [$id],
             [
-                "PARTIAL f.{id, name, parent}",
+                "PARTIAL f.{id, name, iconName, parent}",
                 "PARTIAL fg.{folder, group, canWrite}",
                 "PARTIAL g.{id}",
             ],

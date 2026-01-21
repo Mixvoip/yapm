@@ -40,6 +40,9 @@ class Vault extends DeletableEntity implements AuditableEntityInterface, Permiss
     #[ORM\Column(type: "string", length: 255, nullable: false, options: ['default' => 'folder'])]
     private string $iconName = 'folder';
 
+    #[ORM\Column(type: "text", nullable: true, options: ['default' => null])]
+    private ?string $description = null;
+
     #[ORM\Column(type: "boolean", nullable: false, options: ['default' => true])]
     private bool $allowPasswordsAtRoot = true;
 
@@ -179,6 +182,25 @@ class Vault extends DeletableEntity implements AuditableEntityInterface, Permiss
     }
 
     /**
+     * @return string|null
+     */
+    public function getDescription(): ?string
+    {
+        return $this->description;
+    }
+
+    /**
+     * @param  string|null  $description
+     *
+     * @return Vault
+     */
+    public function setDescription(?string $description): Vault
+    {
+        $this->description = $description;
+        return $this;
+    }
+
+    /**
      * @return bool
      */
     public function isAllowPasswordsAtRoot(): bool
@@ -292,6 +314,7 @@ class Vault extends DeletableEntity implements AuditableEntityInterface, Permiss
             $folderMap[] = [
                 'id' => $folder->getId(),
                 'name' => $folder->getName(),
+                'iconName' => $folder->getIconName(),
                 'parentId' => null,
             ];
         }

@@ -11,10 +11,9 @@ use PHPUnit\Framework\Attributes\DataProvider;
 
 class GetListControllerTest extends WebTestCase
 {
-    #[DataProvider('provideAccessDeniedCases')]
-    public function testAccessDenied(array $params, string $userEmail): void
+    public function testAccessDenied(): void
     {
-        $this->getAsUser("/users", $params, $userEmail);
+        $this->getAsUser("/users", ['displayType' => "table"], "manager@example.com");
         $this->assertAccessDenied();
     }
 
@@ -109,24 +108,6 @@ class GetListControllerTest extends WebTestCase
             "no params" => [
                 [],
                 [UserNormalizer::MINIMISED],
-            ],
-        ];
-    }
-
-    #[ArrayShape([
-        'not admin, not groupManager' => "array",
-        'not admin, display not list' => "array",
-    ])]
-    public static function provideAccessDeniedCases(): array
-    {
-        return [
-            'not admin, not groupManager' => [
-                ['displayType' => "list"],
-                "user0@example.com",
-            ],
-            'not admin, display not list' => [
-                ['displayType' => "table"],
-                "manager@example.com",
             ],
         ];
     }

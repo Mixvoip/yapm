@@ -11,7 +11,7 @@ use App\Service\CleanUp\PartialAccessCleaner;
 use Doctrine\DBAL\Exception;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
-#[AsMessageHandler]
+#[AsMessageHandler(sign: true)]
 readonly class PartialAccessCleanUpMessageHandler
 {
     /**

@@ -38,7 +38,7 @@ class GetController extends AbstractController
         $folder = $folderRepository->findByIds(
             [$id],
             [
-                "PARTIAL f.{id, name, externalId, createdAt, createdBy, updatedAt, updatedBy}",
+                "PARTIAL f.{id, name, externalId, iconName, description, createdAt, createdBy, updatedAt, updatedBy}",
                 "PARTIAL fg.{folder, group, canWrite, partial}",
                 "PARTIAL g.{id, name, private}",
             ],

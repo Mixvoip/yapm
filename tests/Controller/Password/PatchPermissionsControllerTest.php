@@ -21,7 +21,7 @@ class PatchPermissionsControllerTest extends WebTestCase
      * @throws RandomException
      */
     #[DataProvider('provideBadDtoCases')]
-    public function testInvalidDto(array $body, array $expected): void
+    public function testInvalidDto(array $body, array $expected, int $expectedStatusCode = 422): void
     {
         $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041';
 
@@ -31,7 +31,7 @@ class PatchPermissionsControllerTest extends WebTestCase
         }
 
         $this->patchAsUser("/passwords/$passwordId/permissions", $body, 'admin@example.com');
-        $this->assertResponse(422, $expected);
+        $this->assertResponse($expectedStatusCode, $expected);
     }
 
     /**
@@ -58,7 +58,7 @@ class PatchPermissionsControllerTest extends WebTestCase
             400,
             [
                 'error' => 'HTTP Error',
-                'message' => 'At least one group must have write access to the password.',
+                'message' => 'At least one group or user must have write access to the password.',
             ]
         );
     }
@@ -178,7 +178,7 @@ class PatchPermissionsControllerTest extends WebTestCase
 
     #[ArrayShape([
         'missing encryptedPassword' => 'array',
-        'empty groups' => 'array',
+        'empty groups and users' => 'array',
         'invalid group element type' => 'array',
     ])]
     public static function provideBadDtoCases(): array
@@ -204,7 +204,7 @@ class PatchPermissionsControllerTest extends WebTestCase
                     ],
                 ],
             ],
-            'empty groups' => [
+            'empty groups and users' => [
                 [
                     'encryptedPassword' => [
                         // filled at runtime in test method
@@ -213,17 +213,13 @@ class PatchPermissionsControllerTest extends WebTestCase
                         'nonce' => 'to-be-replaced',
                     ],
                     'groups' => [],
+                    'userPermissions' => [],
                 ],
                 [
-                    'error' => "Unprocessable Entity",
-                    'message' => [
-                        [
-                            'parameter' => "groups",
-                            'message' => "At least one group must be provided.",
-                            'code' => "bef8e338-6ae5-4caf-b8e2-50e7b0579e69",
-                        ],
-                    ],
+                    'error' => "HTTP Error",
+                    'message' => "At least one group or user permission must be provided.",
                 ],
+                400,
             ],
             'invalid group element type' => [
                 [
@@ -299,5 +295,209 @@ class PatchPermissionsControllerTest extends WebTestCase
                 'expectManager' => false,
             ],
         ];
+    }
+
+    /**
+     * Test patching password permissions with user permissions (private groups).
+     *
+     * @throws RandomException
+     */
+    public function testPatchWithUserPermissions(): void
+    {
+        $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041';
+
+        /** @var PasswordRepository $passwordRepository */
+        $passwordRepository = $this->container->get('doctrine')->getRepository(Password::class);
+
+        $body = [
+            'encryptedPassword' => $this->makePwdPayload(),
+            'groups' => [
+                [
+                    'groupId' => 'aaaaaaaa-bbbb-cccc-dddd-900000000000', // admin group
+                    'canWrite' => true,
+                ],
+            ],
+            'userPermissions' => [
+                [
+                    'userId' => 'aaaaaaaa-bbbb-cccc-dddd-000000000000', // user0
+                    'canWrite' => false,
+                ],
+            ],
+        ];
+
+        $this->patchAsUser("/passwords/$passwordId/permissions", $body, 'admin@example.com');
+        $this->assertResponseStatusCodeSame(204);
+
+        // Verify user's private group was added
+        $passwordAfter = $passwordRepository->find($passwordId);
+        $user0PrivateGroupId = '11111111-bbbb-cccc-dddd-000000000000';
+        $found = false;
+        foreach ($passwordAfter->getGroupPasswords() as $gp) {
+            if ($gp->getGroup()->getId() === $user0PrivateGroupId) {
+                $found = true;
+                $this->assertFalse($gp->canWrite(), 'User0 should have read-only access');
+                break;
+            }
+        }
+        $this->assertTrue($found, 'User0 private group should have access after PATCH');
+    }
+
+    /**
+     * Test patching password permissions with only user permissions (no groups).
+     *
+     * @throws RandomException
+     */
+    public function testPatchWithOnlyUserPermissions(): void
+    {
+        $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041';
+
+        $body = [
+            'encryptedPassword' => $this->makePwdPayload(),
+            'groups' => [],
+            'userPermissions' => [
+                [
+                    'userId' => 'aaaaaaaa-bbbb-cccc-dddd-a00000000000', // admin user
+                    'canWrite' => true,
+                ],
+                [
+                    'userId' => 'aaaaaaaa-bbbb-cccc-dddd-000000000000', // user0
+                    'canWrite' => false,
+                ],
+            ],
+        ];
+
+        $this->patchAsUser("/passwords/$passwordId/permissions", $body, 'admin@example.com');
+        $this->assertResponseStatusCodeSame(204);
+
+        /** @var PasswordRepository $passwordRepository */
+        $passwordRepository = $this->container->get('doctrine')->getRepository(Password::class);
+        $passwordAfter = $passwordRepository->find($passwordId);
+
+        // Verify both private groups have access
+        $adminPrivateGroupId = '11111111-bbbb-cccc-dddd-a00000000000';
+        $user0PrivateGroupId = '11111111-bbbb-cccc-dddd-000000000000';
+        $foundAdmin = false;
+        $foundUser0 = false;
+
+        foreach ($passwordAfter->getGroupPasswords() as $gp) {
+            $groupId = $gp->getGroup()->getId();
+            if ($groupId === $adminPrivateGroupId) {
+                $foundAdmin = true;
+                $this->assertTrue($gp->canWrite(), 'Admin should have write access');
+            }
+            if ($groupId === $user0PrivateGroupId) {
+                $foundUser0 = true;
+                $this->assertFalse($gp->canWrite(), 'User0 should have read-only access');
+            }
+        }
+        $this->assertTrue($foundAdmin, 'Admin private group should have access');
+        $this->assertTrue($foundUser0, 'User0 private group should have access');
+    }
+
+    /**
+     * Test that non-existent user ID returns error.
+     *
+     * @throws RandomException
+     */
+    public function testRejectsNonExistentUserId(): void
+    {
+        $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041';
+
+        $body = [
+            'encryptedPassword' => $this->makePwdPayload(),
+            'groups' => [
+                [
+                    'groupId' => 'aaaaaaaa-bbbb-cccc-dddd-900000000000',
+                    'canWrite' => true,
+                ],
+            ],
+            'userPermissions' => [
+                [
+                    'userId' => 'aaaaaaaa-bbbb-cccc-dddd-nonexistent0', // non-existent
+                    'canWrite' => false,
+                ],
+            ],
+        ];
+
+        $this->patchAsUser("/passwords/$passwordId/permissions", $body, 'admin@example.com');
+        $this->assertResponseStatusCodeSame(400);
+    }
+
+    /**
+     * Test that duplicate user IDs are rejected.
+     *
+     * @throws RandomException
+     */
+    public function testRejectsDuplicateUserIds(): void
+    {
+        $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041';
+
+        $body = [
+            'encryptedPassword' => $this->makePwdPayload(),
+            'groups' => [
+                [
+                    'groupId' => 'aaaaaaaa-bbbb-cccc-dddd-900000000000',
+                    'canWrite' => true,
+                ],
+            ],
+            'userPermissions' => [
+                [
+                    'userId' => 'aaaaaaaa-bbbb-cccc-dddd-000000000000', // user0
+                    'canWrite' => false,
+                ],
+                [
+                    'userId' => 'aaaaaaaa-bbbb-cccc-dddd-000000000000', // user0 again - duplicate
+                    'canWrite' => true,
+                ],
+            ],
+        ];
+
+        $this->patchAsUser("/passwords/$passwordId/permissions", $body, 'admin@example.com');
+        $this->assertResponse(
+            400,
+            [
+                'error' => 'HTTP Error',
+                'message' => 'Duplicate user IDs.',
+            ]
+        );
+    }
+
+    /**
+     * Test that user permissions can be write-only (with no regular groups).
+     *
+     * @throws RandomException
+     */
+    public function testUserPermissionWithWriteAccess(): void
+    {
+        $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041';
+
+        $body = [
+            'encryptedPassword' => $this->makePwdPayload(),
+            'groups' => [],
+            'userPermissions' => [
+                [
+                    'userId' => 'aaaaaaaa-bbbb-cccc-dddd-a00000000000', // admin user - write
+                    'canWrite' => true,
+                ],
+            ],
+        ];
+
+        $this->patchAsUser("/passwords/$passwordId/permissions", $body, 'admin@example.com');
+        $this->assertResponseStatusCodeSame(204);
+
+        /** @var PasswordRepository $passwordRepository */
+        $passwordRepository = $this->container->get('doctrine')->getRepository(Password::class);
+        $passwordAfter = $passwordRepository->find($passwordId);
+
+        // Only admin private group should remain
+        $adminPrivateGroupId = '11111111-bbbb-cccc-dddd-a00000000000';
+        $foundAdmin = false;
+        foreach ($passwordAfter->getGroupPasswords() as $gp) {
+            if ($gp->getGroup()->getId() === $adminPrivateGroupId) {
+                $foundAdmin = true;
+                $this->assertTrue($gp->canWrite(), 'Admin should have write access');
+            }
+        }
+        $this->assertTrue($foundAdmin, 'Admin private group should have access');
     }
 }

@@ -7,11 +7,11 @@
 
 namespace App\Controller\Password;
 
-use App\Controller\Dto\GroupPermissionDto;
 use App\Controller\EncryptionAwareTrait;
 use App\Controller\GroupInheritanceTrait;
 use App\Controller\GroupValidationTrait;
 use App\Controller\Password\Dto\CreateDto;
+use App\Controller\PermissionProcessingTrait;
 use App\Entity\Enums\PasswordField;
 use App\Entity\Folder;
 use App\Entity\Group;
@@ -37,6 +37,7 @@ class CreateController extends AbstractController
     use GroupInheritanceTrait;
     use EncryptionAwareTrait;
     use GroupValidationTrait;
+    use PermissionProcessingTrait;
 
     /**
      * Create a new password.
@@ -82,33 +83,39 @@ class CreateController extends AbstractController
             throw new BadRequestHttpException("This vault only allows passwords to be created in folders.");
         }
 
-        $requestedGroupIds = array_map(fn(GroupPermissionDto $g) => $g->groupId, $createDto->getGroups());
-        $this->assertNoDuplicateGroupIds($requestedGroupIds);
-
-        $groups = [];
-        $explicitGroupsProvided = !empty($requestedGroupIds);
+        $explicitGroupsProvided = !empty($createDto->getGroups());
+        $explicitUserPermissionsProvided = !empty($createDto->getUserPermissions());
+        $explicitPermissionsProvided = $explicitGroupsProvided || $explicitUserPermissionsProvided;
         $folder = null;
 
         if ($vault->isPrivate() && $explicitGroupsProvided) {
             throw new BadRequestHttpException("Private vaults don't allow setting groups.");
         }
 
+        if ($vault->isPrivate() && $explicitUserPermissionsProvided) {
+            throw new BadRequestHttpException("Private vaults don't allow sharing with users.");
+        }
+
         /** @var GroupRepository $groupRepository */
         $groupRepository = $entityManager->getRepository(Group::class);
 
+        // Process group permissions
+        $groups = [];
+        $groupPermissions = [];
         if ($explicitGroupsProvided) {
-            $groups = $groupRepository->findByIds(
-                $requestedGroupIds,
+            $groupResult = $this->processGroupPermissions(
+                $createDto->getGroups(),
+                $groupRepository,
                 ["PARTIAL g.{id, name, private, publicKey}"]
             );
-            $this->assertGroupsExist($requestedGroupIds, $groups);
-            $this->assertNoPrivateGroups($groups);
-
-            $groupPermissions = [];
-            foreach ($createDto->getGroups() as $groupDto) {
-                $groupPermissions[$groupDto->groupId] = $groupDto->canWrite;
-            }
+            $groups = $groupResult['groups'];
+            $groupPermissions = $groupResult['groupPermissions'];
         }
+
+        // Process user permissions (private groups)
+        $userResult = $this->processUserPermissions($createDto->getUserPermissions(), $groupRepository);
+        $privateGroups = $userResult['privateGroups'];
+        $userPermissions = $userResult['userPermissions'];
 
         if (!is_null($createDto->getFolderId())) {
             /** @var FolderRepository $folderRepository */
@@ -141,10 +148,10 @@ class CreateController extends AbstractController
             throw new BadRequestHttpException("You don't have permission to create a password in this vault.");
         }
 
-        // If no groups are explicitly provided, we use the folder's groups or the vault's groups.
-        if (!$explicitGroupsProvided) {
+        // If no permissions are explicitly provided, we use the folder's groups or the vault's groups.
+        if (!$explicitPermissionsProvided) {
             $groupPermissions = [];
-            if ($folder) {
+            if (!is_null($folder)) {
                 $source = array_filter(
                     $folder->getFolderGroups()->toArray(),
                     fn($fg) => !$fg->isPartial()
@@ -166,28 +173,23 @@ class CreateController extends AbstractController
         }
         $groupIds = array_map(fn($g) => $g->getId(), $groups);
 
-        // Guard: at least one write-capable group must be present
-        $hasWrite = false;
-        foreach ($groups as $g) {
-            if (($groupPermissions[$g->getId()] ?? false) === true) {
-                $hasWrite = true;
-                break;
-            }
-        }
+        // Guard: at least one write-capable group or user must be present
+        $hasWrite = array_any($groupPermissions, fn($canWrite) => $canWrite === true)
+                    || array_any($userPermissions, fn($canWrite) => $canWrite === true);
         if (!$hasWrite) {
-            throw new BadRequestHttpException("At least one group must have write access on the password.");
+            throw new BadRequestHttpException("At least one group or user must have write access on the password.");
         }
 
         $mandatoryPasswordFields = $vault->getMandatoryPasswordFields() ?? [];
-        if (is_null($createDto->getExternalId() && in_array(PasswordField::ExternalId, $mandatoryPasswordFields))) {
+        if (is_null($createDto->getExternalId()) && in_array(PasswordField::ExternalId, $mandatoryPasswordFields)) {
             throw new BadRequestHttpException("External ID is mandatory for this vault.");
         }
 
-        if (is_null($createDto->getLocation() && in_array(PasswordField::Location, $mandatoryPasswordFields))) {
+        if (is_null($createDto->getLocation()) && in_array(PasswordField::Location, $mandatoryPasswordFields)) {
             throw new BadRequestHttpException("Location is mandatory for this vault.");
         }
 
-        if (is_null($createDto->getTarget() && in_array(PasswordField::Target, $mandatoryPasswordFields))) {
+        if (is_null($createDto->getTarget()) && in_array(PasswordField::Target, $mandatoryPasswordFields)) {
             throw new BadRequestHttpException("Target is mandatory for this vault.");
         }
 
@@ -213,8 +215,30 @@ class CreateController extends AbstractController
 
         $entityManager->persist($password);
 
+        // Exclude private groups from $groups if they're already in $privateGroups (to avoid duplicates)
+        $privateGroupIds = array_map(fn($g) => $g->getId(), $privateGroups);
+        $groups = array_filter($groups, fn($g) => !in_array($g->getId(), $privateGroupIds));
+
         foreach ($groups as $group) {
             $permission = $groupPermissions[$group->getId()] ?? false;
+
+            $groupPasswordKeys = $encryptionService->encryptPasswordKeyForGroup($passwordKey, $group->getPublicKey());
+
+            $groupPassword = new GroupsPassword()->setPassword($password)
+                                                 ->setGroup($group)
+                                                 ->setNonce($groupPasswordKeys['nonce'])
+                                                 ->setEncryptedPasswordKey($groupPasswordKeys['encryptedPasswordKey'])
+                                                 ->setEncryptionPublicKey($groupPasswordKeys['encryptionPublicKey'])
+                                                 ->setCanWrite($permission)
+                                                 ->setCreatedBy($loggedInUserIdentifier);
+
+            $password->addGroupPassword($groupPassword);
+            $entityManager->persist($groupPassword);
+        }
+
+        // Create GroupsPassword entries for user permissions (private groups)
+        foreach ($privateGroups as $group) {
+            $permission = $userPermissions[$group->getId()] ?? false;
 
             $groupPasswordKeys = $encryptionService->encryptPasswordKeyForGroup($passwordKey, $group->getPublicKey());
 
@@ -233,21 +257,23 @@ class CreateController extends AbstractController
         $encryptionService->secureMemzero($passwordKey);
 
         if (!is_null($folder)) {
-            // Check if the parent is missing groups if explicit groups are provided.
-            if ($explicitGroupsProvided) {
+            // Check if the parent is missing groups if explicit permissions are provided.
+            if ($explicitPermissionsProvided) {
                 $folderGroupIds = $folder->getGroupIds();
-                $extraGroupIds = array_diff($groupIds, $folderGroupIds);
+                $allProvidedGroupIds = array_merge($groupIds, $privateGroupIds);
+                $allProvidedGroups = array_merge($groups, $privateGroups);
 
+                $extraGroupIds = array_diff($allProvidedGroupIds, $folderGroupIds);
                 if (!empty($extraGroupIds)) {
                     $this->addMissingGroupsToParentFolder(
                         $folder,
-                        $groups,
+                        $allProvidedGroups,
                         $loggedInUserIdentifier,
                         $entityManager
                     );
                 }
 
-                $excludedGroupIds = array_diff($folderGroupIds, $groupIds);
+                $excludedGroupIds = array_diff($folderGroupIds, $allProvidedGroupIds);
                 if (!empty($excludedGroupIds)) {
                     $this->markParentFolderAsPartial(
                         $folder,
@@ -259,10 +285,13 @@ class CreateController extends AbstractController
             }
         }
 
-        if ($explicitGroupsProvided) {
-            $this->addMissingGroupsToVault($vault, $groups, $loggedInUserIdentifier, $entityManager);
+        if ($explicitPermissionsProvided) {
+            $allProvidedGroupIds = array_merge($groupIds, $privateGroupIds);
+            $allProvidedGroups = array_merge($groups, $privateGroups);
 
-            $excludedGroupIds = array_diff($vault->getGroupIds(), $groupIds);
+            $this->addMissingGroupsToVault($vault, $allProvidedGroups, $loggedInUserIdentifier, $entityManager);
+
+            $excludedGroupIds = array_diff($vault->getGroupIds(), $allProvidedGroupIds);
             if (!empty($excludedGroupIds)) {
                 $this->markVaultAsPartial(
                     $vault,

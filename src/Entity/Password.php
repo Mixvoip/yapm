@@ -33,7 +33,7 @@ class Password extends DeletableEntity implements AuditableEntityInterface, Perm
     #[ORM\Column(type: "ascii_string", length: 255, nullable: true, options: ['default' => null])]
     private ?string $encryptedUsername = null;
 
-    #[ORM\Column(type: "ascii_string", length: 255, nullable: true, options: ['default' => null])]
+    #[ORM\Column(type: "text", length: 255, nullable: true, options: ['default' => null])]
     private ?string $encryptedPassword = null;
 
     #[ORM\Column(type: "ascii_string", length: 255, nullable: true, options: ['default' => null])]

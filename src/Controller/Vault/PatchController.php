@@ -50,7 +50,7 @@ class PatchController extends AbstractJsonPatchController
         $vault = $vaultRepository->findByIds(
             [$id],
             [
-                "PARTIAL v.{id, name, mandatoryPasswordFields, mandatoryFolderFields, iconName, allowPasswordsAtRoot, createdAt, createdBy, updatedAt, updatedBy}",
+                "PARTIAL v.{id, name, mandatoryPasswordFields, mandatoryFolderFields, iconName, description, allowPasswordsAtRoot, createdAt, createdBy, updatedAt, updatedBy}",
                 "PARTIAL gv.{vault, group, canWrite, partial}",
                 "PARTIAL g.{id, name, private}",
             ],

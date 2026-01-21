@@ -78,7 +78,7 @@ class FolderRepository extends ServiceEntityRepository
     public function findForFolder(string $folderId, array $groupIds): array
     {
         return $this->createQueryBuilder('f')
-                    ->select("PARTIAL f.{id, name}")
+                    ->select("PARTIAL f.{id, name, iconName}")
                     ->innerJoin('f.folderGroups', 'fg')
                     ->innerJoin('fg.group', 'g')
                     ->where('f.parent = :folderId')
@@ -100,7 +100,7 @@ class FolderRepository extends ServiceEntityRepository
     public function findForVaultRoot(string $vaultId, array $groupIds): array
     {
         return $this->createQueryBuilder('f')
-                    ->select("PARTIAL f.{id, name}")
+                    ->select("PARTIAL f.{id, name, iconName}")
                     ->innerJoin('f.folderGroups', 'fg')
                     ->innerJoin('fg.group', 'g')
                     ->where('f.vault = :vaultId')
@@ -110,5 +110,70 @@ class FolderRepository extends ServiceEntityRepository
                     ->setParameter('groupIds', $groupIds)
                     ->getQuery()
                     ->getResult();
+    }
+
+    /**
+     * Search folders by search term, vault id and group ids.
+     *
+     * @param  string  $search
+     * @param  string  $vaultId
+     * @param  string[]  $groupIds
+     * @param  int  $firstResult
+     * @param  int  $limit
+     * @param  bool  $writableOnly
+     *
+     * @return Folder[]
+     */
+    public function searchFolders(
+        string $search,
+        string $vaultId,
+        array $groupIds,
+        int $firstResult,
+        int $limit,
+        bool $writableOnly = false
+    ): array {
+        $qb = $this->createQueryBuilder("f")
+                   ->select(
+                       "PARTIAL f.{id, name, iconName, externalId, parent}",
+                       "PARTIAL v.{id, name}",
+                       "PARTIAL pf.{id, name, iconName}"
+                   )
+                   ->innerJoin("f.vault", "v")
+                   ->innerJoin("f.folderGroups", "fg")
+                   ->innerJoin("fg.group", "g")
+                   ->leftJoin("f.parent", "pf")
+                   ->where("g.id IN (:groupIds)")
+                   ->setParameter('groupIds', $groupIds)
+                   ->groupBy("f.id")
+                   ->orderBy("f.id")
+                   ->setFirstResult($firstResult)
+                   ->setMaxResults($limit);
+
+        if ($search !== "") {
+            if (is_numeric($search)) {
+                $qb->andWhere("f.externalId = :exactSearch");
+            } else {
+                $orX = $qb->expr()->orX(
+                    "f.name LIKE :vagueSearch",
+                    "f.description LIKE :vagueSearch",
+                    "f.externalId LIKE :exactSearch",
+                );
+                $qb->andWhere($orX)
+                   ->setParameter('vagueSearch', "%$search%");
+            }
+
+            $qb->setParameter("exactSearch", "$search");
+        }
+
+        if (!empty($vaultId)) {
+            $qb->andWhere("f.vault = :vaultId")
+               ->setParameter('vaultId', $vaultId);
+        }
+
+        if ($writableOnly) {
+            $qb->andWhere("fg.canWrite = true");
+        }
+
+        return $qb->getQuery()->getResult();
     }
 }

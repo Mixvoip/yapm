@@ -123,4 +123,44 @@ class GroupRepository extends ServiceEntityRepository
 
         return $qb->getQuery()->getResult();
     }
+
+    /**
+     * Find private groups by user IDs.
+     * Returns array keyed by group ID.
+     *
+     * @param  string[]  $userIds
+     * @param  string[]  $fields
+     * @param  string  $alias
+     * @param  string  $groupUserAlias
+     * @param  string  $userAlias
+     *
+     * @return Group[]
+     */
+    public function findPrivateGroupsByUserIds(
+        array $userIds,
+        array $fields = [],
+        string $alias = 'g',
+        string $groupUserAlias = 'gu',
+        string $userAlias = 'u'
+    ): array {
+        if (empty($userIds)) {
+            return [];
+        }
+
+        $defaultFields = [
+            "PARTIAL $alias.{id, name, publicKey, private}",
+            "PARTIAL $groupUserAlias.{group, user}",
+            "PARTIAL $userAlias.{id, username, email}",
+        ];
+
+        $qb = $this->createQueryBuilder($alias, "$alias.id")
+                   ->select(empty($fields) ? $defaultFields : $fields)
+                   ->innerJoin("$alias.groupUsers", $groupUserAlias)
+                   ->innerJoin("$groupUserAlias.user", $userAlias)
+                   ->where("$userAlias.id IN (:userIds)")
+                   ->andWhere("$alias.private = true")
+                   ->setParameter('userIds', $userIds);
+
+        return $qb->getQuery()->getResult();
+    }
 }

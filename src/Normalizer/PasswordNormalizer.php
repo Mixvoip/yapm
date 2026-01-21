@@ -7,7 +7,6 @@
 
 namespace App\Normalizer;
 
-use App\Entity\GroupsPassword;
 use App\Entity\Password;
 use JetBrains\PhpStorm\ArrayShape;
 use Symfony\Component\Serializer\Exception\ExceptionInterface;
@@ -74,15 +73,36 @@ class PasswordNormalizer implements NormalizerInterface, NormalizerAwareInterfac
         }
 
         if (in_array(self::WITH_GROUPS, $context)) {
-            $normalised['groups'] = array_values(array_map(function (GroupsPassword $groupPassword) {
+            $groups = [];
+            $userShares = [];
+
+            foreach ($data->getGroupPasswords() as $groupPassword) {
                 $group = $groupPassword->getGroup();
 
-                return [
-                    'id' => $group->getId(),
-                    'name' => $group->getName(),
-                    'canWrite' => $groupPassword->canWrite(),
-                ];
-            }, $data->getGroupPasswords()->toArray()));
+                if ($group->isPrivate()) {
+                    // This is a user share - get the user from the group
+                    $groupUser = $group->getGroupUsers()->first();
+                    if ($groupUser) {
+                        $user = $groupUser->getUser();
+                        $userShares[] = [
+                            'id' => $user->getId(),
+                            'email' => $user->getEmail(),
+                            'username' => $user->getUsername(),
+                            'canWrite' => $groupPassword->canWrite(),
+                        ];
+                    }
+                } else {
+                    // Regular group
+                    $groups[] = [
+                        'id' => $group->getId(),
+                        'name' => $group->getName(),
+                        'canWrite' => $groupPassword->canWrite(),
+                    ];
+                }
+            }
+
+            $normalised['groups'] = $groups;
+            $normalised['users'] = $userShares;
         }
 
         if (in_array(self::MINIMISED, $context)) {

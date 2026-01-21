@@ -77,7 +77,7 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
             [
                 "PARTIAL v.{id, name, updatedAt, updatedBy}",
                 "PARTIAL gv.{vault, group, canWrite, partial}",
-                "PARTIAL g.{id, name, publicKey}",
+                "PARTIAL g.{id, name, publicKey, private}",
             ],
             groupAlias: 'g',
             groupVaultAlias: 'gv'
@@ -95,7 +95,17 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
             throw $this->createAccessDeniedException("You don't have permission to update this vault.");
         }
 
+        // Validate at least one permission is provided
+        $this->assertAtLeastOnePermission($dto->groups, $dto->userPermissions);
+
         [$requested, $requestedGroupIds, $groups] = $this->resolveAndValidateGroups($dto, $entityManager);
+        [$requestedUserPerms, $privateGroups, $userIdToGroupId] = $this->resolveAndValidateUserPermissions(
+            $dto,
+            $entityManager
+        );
+
+        // Enforce at least one group or user with write access
+        $this->assertAtLeastOneWriteAccess($requested, $requestedUserPerms);
 
         try {
             $this->decryptUserPrivateKey($dto->encryptedPassword);
@@ -112,7 +122,14 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
         $userIdentifier = $loggedInUser->getUserIdentifier();
         $fullWrite = $vault->hasFullWritePermission($groupIds);
         $groupNames = $this->buildMergedGroupNameMap($vault, $groups);
-        [$current, $target] = $this->buildSnapShots($vault, $requested, $fullWrite);
+
+        // Calculate hasChildren efficiently - only relevant when not cascading
+        $hasChildren = false;
+        if (!$dto->cascade) {
+            $hasChildren = $this->vaultHasChildren($vault->getId(), $entityManager);
+        }
+
+        [$current, $target] = $this->buildSnapShots($vault, $requested, $fullWrite, $hasChildren);
         $isNoOp = $current === $target;
 
         if ($isNoOp && !$dto->cascade) {
@@ -122,19 +139,33 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
 
         $diff = [];
         if (!$isNoOp) {
-            // Update GroupVault explicit relations for this vault.
-            $this->updateGroupVaultRelations(
+            // Update GroupVault explicit relations for this vault (regular groups only).
+            $this->updateVaultGroupPermissions(
                 $vault,
                 $groups,
-                $requestedGroupIds,
                 $requested,
                 $userIdentifier,
                 $entityManager,
-                $fullWrite
+                $fullWrite,
+                forPrivateGroups: false,
+                hasChildren: $hasChildren
             );
 
             $diff = $this->diffPermissions($current, $target, $groupNames);
         }
+
+        // Update private group relations (user permissions) for this vault
+        // Always process - even if requestedUserPerms is empty, we need to demote existing private groups
+        $this->updateVaultGroupPermissions(
+            $vault,
+            $privateGroups,
+            $requestedUserPerms,
+            $userIdentifier,
+            $entityManager,
+            $fullWrite,
+            forPrivateGroups: true,
+            hasChildren: $hasChildren
+        );
 
         $clientIp = AuditService::getClientIp($request);
         $userAgent = $request->headers->get('User-Agent');
@@ -152,7 +183,15 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
         }
 
         // Create ShareProcess and dispatch message
-        $process = $this->buildShareProcess(ProcessTargetType::Vault, $vault, $dto, $groups, $userIdentifier);
+        $process = $this->buildShareProcess(
+            ProcessTargetType::Vault,
+            $vault,
+            $dto,
+            $groups,
+            $privateGroups,
+            $userIdToGroupId,
+            $userIdentifier
+        );
         $entityManager->persist($process);
         $entityManager->flush();
 
@@ -162,38 +201,46 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
     }
 
     /**
-     * Update GroupVault explicit relations to match request, preserving partials not explicitly provided.
+     * Update GroupVault relations for a vault.
+     * Handles both regular groups (isPrivate=false) and private groups (user permissions, isPrivate=true).
      *
      * @param  Vault  $vault
-     * @param  Group[]  $groups
-     * @param  array  $requestedGroupIds
-     * @param  array  $requested
+     * @param  Group[]  $groups  Groups to update (keyed by ID for $requested lookup)
+     * @param  array  $requested  Requested permissions keyed by group ID ['canWrite' => bool, 'partial' => bool]
      * @param  string  $userIdentifier
      * @param  EntityManagerInterface  $entityManager
      * @param  bool  $hasFullWrite
+     * @param  bool  $forPrivateGroups  True to process private groups, false to process regular groups
+     * @param  bool  $hasChildren  Whether vault has children (cascade=false + hasChildren = partial)
      *
      * @return void
      */
-    private function updateGroupVaultRelations(
+    private function updateVaultGroupPermissions(
         Vault $vault,
         array $groups,
-        array $requestedGroupIds,
         array $requested,
         string $userIdentifier,
         EntityManagerInterface $entityManager,
-        bool $hasFullWrite
+        bool $hasFullWrite,
+        bool $forPrivateGroups,
+        bool $hasChildren = false
     ): void {
-        // Map current
+        // Map current groups (filter by private flag)
         $currentMap = [];
         foreach ($vault->getGroupVaults() as $gv) {
             /** @var GroupsVault $gv */
+            $isPrivate = $gv->getGroup()->isPrivate();
+            if ($forPrivateGroups !== $isPrivate) {
+                continue;
+            }
             $currentMap[$gv->getGroup()->getId()] = $gv;
         }
         $currentIds = array_keys($currentMap);
+        $requestedIds = array_keys($requested);
 
-        $toRemove = array_diff($currentIds, $requestedGroupIds);
-        $toAdd = array_diff($requestedGroupIds, $currentIds);
-        $toKeep = array_intersect($currentIds, $requestedGroupIds);
+        $toRemove = array_diff($currentIds, $requestedIds);
+        $toAdd = array_diff($requestedIds, $currentIds);
+        $toKeep = array_intersect($currentIds, $requestedIds);
 
         $groupsById = [];
         foreach ($groups as $group) {
@@ -202,35 +249,39 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
 
         // Add new relations
         foreach ($toAdd as $gid) {
+            if (!isset($groupsById[$gid])) {
+                continue;
+            }
             $group = $groupsById[$gid];
             $groupPermission = $requested[$gid];
-            $requestedPartial = $groupPermission['partial'];
+            $requestedPartial = $groupPermission['partial'] ?? false;
             if ($requestedPartial) {
                 continue;
             }
-            $partial = $groupPermission['partial'] || !$hasFullWrite;
+            $partial = $requestedPartial || !$hasFullWrite || $hasChildren;
 
-            $gv = new GroupsVault()->setVault($vault)
-                                   ->setGroup($group)
-                                   ->setCanWrite($groupPermission['canWrite'])
-                                   ->setPartial($partial)
-                                   ->setCreatedBy($userIdentifier);
+            $gv = new GroupsVault();
+            $gv->setVault($vault)
+               ->setGroup($group)
+               ->setCanWrite($groupPermission['canWrite'])
+               ->setPartial($partial)
+               ->setCreatedBy($userIdentifier);
 
             $vault->getGroupVaults()->add($gv);
             $entityManager->persist($gv);
         }
 
-        // Update canWrite for kept groups and ensure explicit (partial=false)
+        // Update kept relations
         foreach ($toKeep as $gid) {
             /** @var GroupsVault $gv */
             $gv = $currentMap[$gid];
             $groupPermission = $requested[$gid];
             $newCanWrite = $groupPermission['canWrite'];
-            $requestedPartial = $groupPermission['partial'];
+            $requestedPartial = $groupPermission['partial'] ?? false;
             if ($requestedPartial) {
                 continue;
             }
-            $newPartial = $groupPermission['partial'] || !$hasFullWrite;
+            $newPartial = $requestedPartial || !$hasFullWrite || $hasChildren;
 
             if ($gv->canWrite() !== $newCanWrite || $gv->isPartial() !== $newPartial) {
                 $gv->setCanWrite($newCanWrite)
@@ -239,7 +290,7 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
             }
         }
 
-        // Remove relations (but keep partial groups if not explicitly provided)
+        // Demote removed relations
         foreach ($toRemove as $gid) {
             /** @var GroupsVault $gv */
             $gv = $currentMap[$gid];
@@ -252,5 +303,34 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
                ->setUpdatedBy($userIdentifier);
             $entityManager->persist($gv);
         }
+    }
+
+    /**
+     * Check if a vault has children (folders or root-level passwords).
+     * Uses direct SQL queries for efficiency to avoid loading collections.
+     *
+     * @param  string  $vaultId
+     * @param  EntityManagerInterface  $entityManager
+     *
+     * @return bool
+     */
+    private function vaultHasChildren(string $vaultId, EntityManagerInterface $entityManager): bool
+    {
+        $conn = $entityManager->getConnection();
+
+        // Check for folders
+        $hasFolders = $conn->fetchOne(
+            "SELECT 1 FROM folders WHERE vault_id = :vid AND deleted_at IS NULL LIMIT 1",
+            ['vid' => $vaultId]
+        );
+        if ($hasFolders) {
+            return true;
+        }
+
+        // Check for passwords directly in vault (not in folders)
+        return (bool)$conn->fetchOne(
+            "SELECT 1 FROM passwords WHERE vault_id = :vid AND folder_id IS NULL AND deleted_at IS NULL LIMIT 1",
+            ['vid' => $vaultId]
+        );
     }
 }

@@ -54,6 +54,7 @@ class ShareProcessNormalizer implements NormalizerInterface, NormalizerAwareInte
             'targetType' => $data->getTargetType()->value,
             'cascade' => $data->isCascade(),
             'requestedGroups' => $data->getRequestedGroups(),
+            'requestedUsers' => $data->getRequestedUsers(),
             'status' => $data->getStatus()->value,
         ];
 

@@ -104,6 +104,7 @@ class PasswordNormalizerTest extends KernelTestCase
                     'folder' => [
                         'id' => "aaaaaaaa-bbbb-cccc-dddd-fc0000000000",
                         'name' => "Customer-0",
+                        'iconName' => "folder",
                     ],
                 ],
             ],
@@ -141,6 +142,7 @@ class PasswordNormalizerTest extends KernelTestCase
                             'canWrite' => true,
                         ],
                     ],
+                    'users' => [],
                 ],
             ],
             'for search' => [
@@ -160,6 +162,7 @@ class PasswordNormalizerTest extends KernelTestCase
                     'folder' => [
                         'id' => "aaaaaaaa-bbbb-cccc-dddd-fc0000000000",
                         'name' => "Customer-0",
+                        'iconName' => "folder",
                     ],
                 ],
             ],

@@ -8,6 +8,7 @@
 namespace App\Controller\Vault\Dto;
 
 use App\Controller\Dto\GroupPermissionDto;
+use App\Controller\Dto\UserPermissionDto;
 use App\Entity\Enums\FolderField;
 use App\Entity\Enums\PasswordField;
 use Symfony\Component\Validator\Constraints as Assert;
@@ -21,6 +22,8 @@ readonly class CreateDto
      * @param  PasswordField[]  $mandatoryPasswordFields
      * @param  string  $iconName
      * @param  bool  $allowPasswordsAtRoot
+     * @param  string|null  $description
+     * @param  UserPermissionDto[]  $userPermissions
      */
     public function __construct(
         #[
@@ -30,12 +33,12 @@ readonly class CreateDto
         public string $name,
 
         #[
-            Assert\NotBlank,
+            Assert\Valid,
             Assert\All(
                 new Assert\Type(GroupPermissionDto::class),
             )
         ]
-        public array $groups,
+        public array $groups = [],
 
         #[Assert\All(
             new Assert\Choice(callback: [FolderField::class, "cases"]),
@@ -50,7 +53,17 @@ readonly class CreateDto
         #[Assert\NotBlank(normalizer: "trim")]
         public string $iconName = "folder",
 
-        public bool $allowPasswordsAtRoot = true
+        public bool $allowPasswordsAtRoot = true,
+
+        public ?string $description = null,
+
+        #[
+            Assert\Valid,
+            Assert\All([
+                new Assert\Type(UserPermissionDto::class),
+            ])
+        ]
+        public array $userPermissions = [],
     ) {
     }
 }

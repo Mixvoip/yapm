@@ -9,6 +9,7 @@ namespace App\Controller;
 
 use App\Controller\Dto\GroupPermissionWithPartialDto;
 use App\Controller\Dto\PatchPermissionsWithPartialDto;
+use App\Controller\Dto\UserPermissionWithPartialDto;
 use App\Entity\Enums\ShareProcess\TargetType;
 use App\Entity\Folder;
 use App\Entity\Group;
@@ -27,38 +28,30 @@ abstract class AbstractPatchPermissionsController extends AbstractController
     use GroupValidationTrait;
 
     /**
-     * Enforce at least one group to have write access.
-     *
-     * @param  array  $requested
-     *
-     * @return void
-     * @throws BadRequestHttpException
-     */
-    protected function enforceWriteAccess(array $requested): void
-    {
-        if (array_any($requested, fn($groupPermissions) => $groupPermissions['canWrite'] === true)) {
-            return;
-        }
-
-        throw new BadRequestHttpException("At least one group must have write access.");
-    }
-
-    /**
      * Check if the request is a no-op.
+     * Excludes private groups from the current state - they are managed via userPermissions.
      *
      * @param  object  $resource
      * @param  array  $requested
      * @param  bool  $fullWrite
+     * @param  bool  $hasChildren  Whether the resource has children (only relevant when cascade=false)
      *
      * @return array
      * @throws InvalidArgumentException
      */
-    protected function buildSnapShots(object $resource, array $requested, bool $fullWrite): array
-    {
+    protected function buildSnapShots(
+        object $resource,
+        array $requested,
+        bool $fullWrite,
+        bool $hasChildren = false
+    ): array {
         $current = [];
 
         if ($resource instanceof Folder) {
             foreach ($resource->getFolderGroups() as $fg) {
+                if ($fg->getGroup()->isPrivate()) {
+                    continue; // Skip private groups - managed via userPermissions
+                }
                 $current[$fg->getGroup()->getId()] = [
                     'canWrite' => $fg->canWrite(),
                     'partial' => $fg->isPartial(),
@@ -66,6 +59,9 @@ abstract class AbstractPatchPermissionsController extends AbstractController
             }
         } elseif ($resource instanceof Vault) {
             foreach ($resource->getGroupVaults() as $gv) {
+                if ($gv->getGroup()->isPrivate()) {
+                    continue; // Skip private groups - managed via userPermissions
+                }
                 $current[$gv->getGroup()->getId()] = [
                     'canWrite' => $gv->canWrite(),
                     'partial' => $gv->isPartial(),
@@ -76,10 +72,10 @@ abstract class AbstractPatchPermissionsController extends AbstractController
         }
 
         $target = array_map(
-            function ($groupPermissions) use ($fullWrite) {
+            function ($groupPermissions) use ($fullWrite, $hasChildren) {
                 return [
                     'canWrite' => $groupPermissions['canWrite'],
-                    'partial' => $groupPermissions['partial'] || !$fullWrite,
+                    'partial' => $groupPermissions['partial'] || !$fullWrite || $hasChildren,
                 ];
             },
             $requested
@@ -165,6 +161,8 @@ abstract class AbstractPatchPermissionsController extends AbstractController
      * @param  AuditableEntityInterface  $scope
      * @param  PatchPermissionsWithPartialDto  $dto
      * @param  Group[]  $groups
+     * @param  Group[]  $privateGroups
+     * @param  array  $userIdToGroupId
      * @param  string  $userIdentifier
      *
      * @return ShareProcess
@@ -174,28 +172,63 @@ abstract class AbstractPatchPermissionsController extends AbstractController
         AuditableEntityInterface $scope,
         PatchPermissionsWithPartialDto $dto,
         array $groups,
+        array $privateGroups,
+        array $userIdToGroupId,
         string $userIdentifier
     ): ShareProcess {
-        return new ShareProcess()->setTargetType($targetType)
-                                 ->setScopeId($scope->getId())
-                                 ->setMetadata($scope)
-                                 ->setCascade($dto->cascade)
-                                 ->setRequestedGroups(
-                                     array_map(
-                                         fn(GroupPermissionWithPartialDto $g) => [
-                                             'groupId' => $g->groupId,
-                                             'name' => $groups[$g->groupId]->getName(),
-                                             'canWrite' => $g->canWrite,
-                                             'partial' => $g->partial,
-                                         ],
-                                         $dto->groups
-                                     )
-                                 )
-                                 ->setCreatedBy($userIdentifier);
+        $shareProcess = new ShareProcess();
+        $shareProcess->setTargetType($targetType)
+                     ->setScopeId($scope->getId())
+                     ->setMetadata($scope)
+                     ->setCascade($dto->cascade)
+                     ->setRequestedGroups(
+                         array_map(
+                             fn(GroupPermissionWithPartialDto $g) => [
+                                 'groupId' => $g->groupId,
+                                 'name' => $groups[$g->groupId]->getName(),
+                                 'canWrite' => $g->canWrite,
+                                 'partial' => $g->partial,
+                             ],
+                             $dto->groups
+                         )
+                     )
+                     ->setCreatedBy($userIdentifier);
+
+        // Add user permissions if any
+        if (!empty($dto->userPermissions)) {
+            // Build userId -> user info map from private groups
+            $userInfoMap = [];
+            foreach ($privateGroups as $group) {
+                foreach ($group->getGroupUsers() as $gu) {
+                    $user = $gu->getUser();
+                    $userInfoMap[$user->getId()] = [
+                        'username' => $user->getUsername(),
+                        'email' => $user->getEmail(),
+                    ];
+                }
+            }
+
+            $shareProcess->setRequestedUsers(
+                array_map(
+                    fn(UserPermissionWithPartialDto $u) => [
+                        'userId' => $u->userId,
+                        'username' => $userInfoMap[$u->userId]['username'],
+                        'email' => $userInfoMap[$u->userId]['email'],
+                        'groupId' => $userIdToGroupId[$u->userId],
+                        'canWrite' => $u->canWrite,
+                        'partial' => $u->partial,
+                    ],
+                    $dto->userPermissions
+                )
+            );
+        }
+
+        return $shareProcess;
     }
 
     /**
      * Resolve the dto and validate the groups.
+     * Note: Does not enforce write access - caller should check both groups and users.
      *
      * @param  PatchPermissionsWithPartialDto  $dto
      * @param  EntityManagerInterface  $entityManager
@@ -215,24 +248,77 @@ abstract class AbstractPatchPermissionsController extends AbstractController
             ];
         }
         $requestedGroupIds = array_keys($requested);
+
+        if (empty($requestedGroupIds)) {
+            return [[], [], []];
+        }
+
         $this->assertNoDuplicateGroupIds($requestedGroupIds);
 
         /** @var GroupRepository $groupRepository */
         $groupRepository = $entityManager->getRepository(Group::class);
         $groups = $groupRepository->findByIds(
             $requestedGroupIds,
-            ["PARTIAL g.{id, name, publicKey}"]
+            ["PARTIAL g.{id, name, publicKey, private}"]
         );
         $this->assertGroupsExist($requestedGroupIds, $groups);
         $this->assertNoPrivateGroups($groups);
-
-        $this->enforceWriteAccess($requested);
 
         return [$requested, $requestedGroupIds, $groups];
     }
 
     /**
+     * Resolve and validate user permissions.
+     * Returns [requestedUsers (keyed by groupId), privateGroups, userIdToGroupId map]
+     *
+     * @param  PatchPermissionsWithPartialDto  $dto
+     * @param  EntityManagerInterface  $entityManager
+     *
+     * @return array
+     * @throws BadRequestHttpException
+     */
+    protected function resolveAndValidateUserPermissions(
+        PatchPermissionsWithPartialDto $dto,
+        EntityManagerInterface $entityManager
+    ): array {
+        if (empty($dto->userPermissions)) {
+            return [[], [], []];
+        }
+
+        $requestedUserIds = array_map(fn($u) => $u->userId, $dto->userPermissions);
+        $this->assertNoDuplicateUserIds($requestedUserIds);
+
+        /** @var GroupRepository $groupRepository */
+        $groupRepository = $entityManager->getRepository(Group::class);
+        $privateGroups = $groupRepository->findPrivateGroupsByUserIds($requestedUserIds);
+
+        $this->assertUsersExist($requestedUserIds, $privateGroups);
+
+        // Build userId -> groupId map
+        $userIdToGroupId = [];
+        foreach ($privateGroups as $group) {
+            foreach ($group->getGroupUsers() as $gu) {
+                $userIdToGroupId[$gu->getUser()->getId()] = $group->getId();
+            }
+        }
+
+        // Build requested permissions keyed by group ID
+        $requested = [];
+        foreach ($dto->userPermissions as $userDto) {
+            $groupId = $userIdToGroupId[$userDto->userId];
+            $requested[$groupId] = [
+                'userId' => $userDto->userId,
+                'canWrite' => $userDto->canWrite,
+                'partial' => $userDto->partial ?? false,
+            ];
+        }
+
+        return [$requested, $privateGroups, $userIdToGroupId];
+    }
+
+    /**
      * Build a group name map from the requested groups and the current relations.
+     * Excludes private groups - they are managed via userPermissions.
      *
      * @param  object  $resource
      * @param  array  $requestedGroups
@@ -251,11 +337,17 @@ abstract class AbstractPatchPermissionsController extends AbstractController
         // add names from current relations on the resource (covers removed groups)
         if ($resource instanceof Folder) {
             foreach ($resource->getFolderGroups() as $rel) {
+                if ($rel->getGroup()->isPrivate()) {
+                    continue; // Skip private groups
+                }
                 $gid = $rel->getGroup()->getId();
                 $names[$gid] ??= $rel->getGroup()->getName();
             }
         } elseif ($resource instanceof Vault) {
             foreach ($resource->getGroupVaults() as $rel) {
+                if ($rel->getGroup()->isPrivate()) {
+                    continue; // Skip private groups
+                }
                 $gid = $rel->getGroup()->getId();
                 $names[$gid] ??= $rel->getGroup()->getName();
             }

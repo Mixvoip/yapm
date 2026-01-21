@@ -49,7 +49,7 @@ class GetVaultsController extends AbstractController
             [
                 "PARTIAL u.{id}",
                 "PARTIAL gu.{group, user}",
-                "PARTIAL g.{id, name}",
+                "PARTIAL g.{id, name, private}",
             ],
             groupAlias: "g",
             groupUserAlias: "gu"
@@ -64,8 +64,8 @@ class GetVaultsController extends AbstractController
             [
                 "PARTIAL v.{id, name, iconName, allowPasswordsAtRoot, mandatoryPasswordFields, mandatoryFolderFields}",
                 "PARTIAL gv.{vault, group, canWrite, partial}",
-                "PARTIAL g.{id, name}",
-            ],
+                "PARTIAL g.{id, name, private}",
+            ]
         );
 
         return $this->json(
