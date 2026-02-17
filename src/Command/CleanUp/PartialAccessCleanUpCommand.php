@@ -72,6 +72,7 @@ class PartialAccessCleanUpCommand extends Command
 
         try {
             $deleted = $this->partialAccessCleaner->cleanUp();
+            $promoted = $this->partialAccessCleaner->promote();
         } catch (Exception $e) {
             $io->error("Failed to clean up partial access: " . $e->getMessage());
             return Command::FAILURE;
@@ -79,6 +80,7 @@ class PartialAccessCleanUpCommand extends Command
 
         $io->success("Partial access clean up completed successfully.");
         $io->info("Deleted $deleted partial access entries.");
+        $io->info("Promoted $promoted partial access entries to full access.");
 
         return Command::SUCCESS;
     }

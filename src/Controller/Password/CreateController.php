@@ -213,6 +213,19 @@ class CreateController extends AbstractController
                      ->setUsernameNonce($encryptedUsername['encryptedDataNonce']);
         }
 
+        if (!is_null($createDto->getTotp())) {
+            $encryptedTotpSecretKey = $this->encryptPasswordData(
+                $createDto->getTotp()->encryptedSecretKey,
+                $passwordKey
+            );
+
+            $password->setEncryptedTotpSecretKey($encryptedTotpSecretKey['encryptedData'])
+                     ->setTotpSecretKeyNonce($encryptedTotpSecretKey['encryptedDataNonce'])
+                     ->setTotpAlgorithm($createDto->getTotp()->algorithm)
+                     ->setTotpPeriod($createDto->getTotp()->period)
+                     ->setTotpDigits($createDto->getTotp()->digits);
+        }
+
         $entityManager->persist($password);
 
         // Exclude private groups from $groups if they're already in $privateGroups (to avoid duplicates)

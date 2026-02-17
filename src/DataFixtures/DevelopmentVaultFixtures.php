@@ -2,6 +2,9 @@
 
 namespace App\DataFixtures;
 
+use App\Entity\Enums\TotpAlgorithm;
+use App\Entity\Enums\TotpDigits;
+use App\Entity\Enums\TotpPeriod;
 use App\Entity\Folder;
 use App\Entity\FoldersGroup;
 use App\Entity\Group;
@@ -176,6 +179,16 @@ class DevelopmentVaultFixtures extends Fixture implements DependentFixtureInterf
                          ->setPasswordNonce($encPwd['nonce'])
                          ->setEncryptedUsername($encUser['encryptedData'])
                          ->setUsernameNonce($encUser['nonce']);
+
+                // Add TOTP to the third password in each folder (i=2)
+                if ($i === 2) {
+                    $encTotp = $this->encryptionService->encryptPasswordData('JBSWY3DPEHPK3PXP', $passwordKey);
+                    $password->setEncryptedTotpSecretKey($encTotp['encryptedData'])
+                             ->setTotpSecretKeyNonce($encTotp['nonce'])
+                             ->setTotpAlgorithm(TotpAlgorithm::Sha1)
+                             ->setTotpPeriod(TotpPeriod::Thirty)
+                             ->setTotpDigits(TotpDigits::Six);
+                }
 
                 $manager->persist($password);
 

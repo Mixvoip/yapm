@@ -19,6 +19,7 @@ readonly class CreateDto
      * @param  string  $vaultId
      * @param  EncryptedClientDataDto  $encryptedPassword
      * @param  EncryptedClientDataDto|null  $encryptedUsername
+     * @param  TotpDataDto|null  $totp
      * @param  string|null  $target
      * @param  string|null  $description
      * @param  string|null  $location
@@ -49,6 +50,9 @@ readonly class CreateDto
 
         #[Assert\Valid]
         private ?EncryptedClientDataDto $encryptedUsername = null,
+
+        #[Assert\Valid]
+        private ?TotpDataDto $totp = null,
 
         #[
             Assert\Type('string'),
@@ -126,6 +130,14 @@ readonly class CreateDto
     public function getEncryptedUsername(): ?EncryptedClientDataDto
     {
         return $this->encryptedUsername;
+    }
+
+    /**
+     * @return TotpDataDto|null
+     */
+    public function getTotp(): ?TotpDataDto
+    {
+        return $this->totp;
     }
 
     /**

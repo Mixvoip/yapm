@@ -62,7 +62,7 @@ class GetPasswordsController extends AbstractController
             $folder->getId(),
             $loggedInUser->getGroupIds(),
             [
-                "PARTIAL p.{id, title, target, location, description, externalId, createdAt, createdBy, updatedAt, updatedBy}",
+                "PARTIAL p.{id, title, target, location, description, encryptedTotpSecretKey, totpPeriod, externalId, createdAt, createdBy, updatedAt, updatedBy}",
                 "PARTIAL gp.{group, password, canWrite}",
                 "PARTIAL g.{id, name, private}",
             ],
