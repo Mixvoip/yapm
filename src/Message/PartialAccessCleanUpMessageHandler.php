@@ -29,6 +29,10 @@ readonly class PartialAccessCleanUpMessageHandler
      */
     public function __invoke(PartialAccessCleanUpMessage $message): void
     {
+        // Run cleanup first (removes unjustified partial records)
         $this->partialAccessCleaner->cleanUp($message->vaultId, $message->groupIds);
+
+        // Then run promotion (upgrades justified partial to full)
+        $this->partialAccessCleaner->promote($message->vaultId, $message->groupIds);
     }
 }

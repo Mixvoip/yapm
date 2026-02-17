@@ -1053,6 +1053,11 @@ paths:
                   allOf:
                     - $ref: '#/components/schemas/ClientEncryptedData'
                     - nullable: true
+                totp:
+                  allOf:
+                    - $ref: '#/components/schemas/TotpData'
+                    - nullable: true
+                  description: TOTP data (null to clear, omit to leave unchanged)
       responses:
         204:
           description: Password sensitive data updated successfully
@@ -1080,6 +1085,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
+  /passwords/{id}/totp:
+    post:
+      tags:
+        - Passwords
+      summary: Retrieve TOTP data for a password
+      description: Retrieve TOTP data for a password by its id encrypted with the user's public key
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientEncryptedData'
+        description: >
+          The request body must contain the user's encrypted password data
+          used for authentication:
+          `encryptedData`, `clientPublicKey`, and `nonce`.
+      responses:
+        200:
+          description: Password TOTP data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordTotpDataResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Password not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /passwords/search:
     get:
       tags:
@@ -2747,6 +2789,15 @@ components:
               description: External Id of the password
               example: 123
               nullable: true
+            hasTotp:
+              type: boolean
+              description: Whether the password has TOTP configured
+              example: false
+            totpPeriod:
+              allOf:
+                - $ref: '#/components/schemas/TotpPeriod'
+                - nullable: true
+              description: TOTP period in seconds (null if no TOTP configured)
     PasswordWithGroups:
       allOf:
         - $ref: '#/components/schemas/Password'
@@ -2947,6 +2998,8 @@ components:
           description: Users that have access to the password
           items:
             $ref: "#/components/schemas/RequestUserPermission"
+        totp:
+          $ref: "#/components/schemas/TotpData"
       required:
         - title
         - encryptedPassword
@@ -2960,6 +3013,72 @@ components:
             - nullable: true
         password:
           $ref: "#/components/schemas/UserEncryptedData"
+        userKeys:
+          type: object
+          properties:
+            privateKey:
+              type: string
+              description: Encrypted private key of the user
+              example: verySecretKey
+            nonce:
+              type: string
+              description: Nonce used to encrypt the data
+              example: verySecretKey
+            salt:
+              type: string
+              description: Salt used to encrypt the users private key
+              example: verySecretKey
+    TotpAlgorithm:
+      type: string
+      enum: [sha1, sha256, sha512]
+      description: TOTP algorithm
+      example: sha1
+    TotpPeriod:
+      type: integer
+      enum: [30, 60]
+      description: TOTP period in seconds
+      example: 30
+    TotpDigits:
+      type: integer
+      enum: [6, 8]
+      description: Number of TOTP digits
+      example: 6
+    TotpData:
+      type: object
+      description: TOTP data for creating or updating a password
+      properties:
+        encryptedSecretKey:
+          $ref: "#/components/schemas/ClientEncryptedData"
+        algorithm:
+          $ref: "#/components/schemas/TotpAlgorithm"
+        period:
+          $ref: "#/components/schemas/TotpPeriod"
+        digits:
+          $ref: "#/components/schemas/TotpDigits"
+      required:
+        - encryptedSecretKey
+        - algorithm
+        - period
+        - digits
+    TotpDataResponse:
+      type: object
+      description: TOTP data response (with re-encrypted secret key)
+      properties:
+        secretKey:
+          $ref: "#/components/schemas/UserEncryptedData"
+        algorithm:
+          $ref: "#/components/schemas/TotpAlgorithm"
+        period:
+          $ref: "#/components/schemas/TotpPeriod"
+        digits:
+          $ref: "#/components/schemas/TotpDigits"
+    PasswordTotpDataResponse:
+      type: object
+      properties:
+        totp:
+          allOf:
+            - $ref: "#/components/schemas/TotpDataResponse"
+            - nullable: true
         userKeys:
           type: object
           properties:

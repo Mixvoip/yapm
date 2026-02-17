@@ -7,6 +7,9 @@
 
 namespace App\Entity;
 
+use App\Entity\Enums\TotpAlgorithm;
+use App\Entity\Enums\TotpDigits;
+use App\Entity\Enums\TotpPeriod;
 use App\Repository\PasswordRepository;
 use App\Service\Audit\AuditableEntityInterface;
 use Doctrine\Common\Collections\ArrayCollection;
@@ -41,6 +44,21 @@ class Password extends DeletableEntity implements AuditableEntityInterface, Perm
 
     #[ORM\Column(type: "ascii_string", length: 255, nullable: true, options: ['default' => null])]
     private ?string $passwordNonce = null;
+
+    #[ORM\Column(type: "ascii_string", length: 255, nullable: true, options: ['default' => null])]
+    private ?string $encryptedTotpSecretKey = null;
+
+    #[ORM\Column(type: "ascii_string", length: 255, nullable: true, options: ['default' => null])]
+    private ?string $totpSecretKeyNonce = null;
+
+    #[ORM\Column(type: "string", length: 20, nullable: true, enumType: TotpAlgorithm::class, options: ['default' => null])]
+    private ?TotpAlgorithm $totpAlgorithm = null;
+
+    #[ORM\Column(type: "integer", nullable: true, enumType: TotpPeriod::class, options: ['default' => null])]
+    private ?TotpPeriod $totpPeriod = null;
+
+    #[ORM\Column(type: "integer", nullable: true, enumType: TotpDigits::class, options: ['default' => null])]
+    private ?TotpDigits $totpDigits = null;
 
     #[ORM\Column(type: "string", length: 255, nullable: true, options: ['default' => null])]
     private ?string $target = null;
@@ -200,6 +218,126 @@ class Password extends DeletableEntity implements AuditableEntityInterface, Perm
     {
         $this->passwordNonce = $passwordNonce;
         return $this;
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getEncryptedTotpSecretKey(): ?string
+    {
+        return $this->encryptedTotpSecretKey;
+    }
+
+    /**
+     * @param  string|null  $encryptedTotpSecretKey
+     *
+     * @return Password
+     */
+    public function setEncryptedTotpSecretKey(?string $encryptedTotpSecretKey): Password
+    {
+        $this->encryptedTotpSecretKey = $encryptedTotpSecretKey;
+        return $this;
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getTotpSecretKeyNonce(): ?string
+    {
+        return $this->totpSecretKeyNonce;
+    }
+
+    /**
+     * @param  string|null  $totpSecretKeyNonce
+     *
+     * @return Password
+     */
+    public function setTotpSecretKeyNonce(?string $totpSecretKeyNonce): Password
+    {
+        $this->totpSecretKeyNonce = $totpSecretKeyNonce;
+        return $this;
+    }
+
+    /**
+     * @return TotpAlgorithm|null
+     */
+    public function getTotpAlgorithm(): ?TotpAlgorithm
+    {
+        return $this->totpAlgorithm;
+    }
+
+    /**
+     * @param  TotpAlgorithm|null  $totpAlgorithm
+     *
+     * @return Password
+     */
+    public function setTotpAlgorithm(?TotpAlgorithm $totpAlgorithm): Password
+    {
+        $this->totpAlgorithm = $totpAlgorithm;
+        return $this;
+    }
+
+    /**
+     * @return TotpPeriod|null
+     */
+    public function getTotpPeriod(): ?TotpPeriod
+    {
+        return $this->totpPeriod;
+    }
+
+    /**
+     * @param  TotpPeriod|null  $totpPeriod
+     *
+     * @return Password
+     */
+    public function setTotpPeriod(?TotpPeriod $totpPeriod): Password
+    {
+        $this->totpPeriod = $totpPeriod;
+        return $this;
+    }
+
+    /**
+     * @return TotpDigits|null
+     */
+    public function getTotpDigits(): ?TotpDigits
+    {
+        return $this->totpDigits;
+    }
+
+    /**
+     * @param  TotpDigits|null  $totpDigits
+     *
+     * @return Password
+     */
+    public function setTotpDigits(?TotpDigits $totpDigits): Password
+    {
+        $this->totpDigits = $totpDigits;
+        return $this;
+    }
+
+    /**
+     * Clear all TOTP fields.
+     *
+     * @return Password
+     */
+    public function clearTotp(): Password
+    {
+        $this->encryptedTotpSecretKey = null;
+        $this->totpSecretKeyNonce = null;
+        $this->totpAlgorithm = null;
+        $this->totpPeriod = null;
+        $this->totpDigits = null;
+        return $this;
+    }
+
+    /**
+     * Check if this password has TOTP configured.
+     *
+     * @return bool
+     */
+    public function hasTotp(): bool
+    {
+        return !is_null($this->encryptedTotpSecretKey);
     }
 
     /**

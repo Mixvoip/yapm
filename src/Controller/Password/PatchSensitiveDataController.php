@@ -7,6 +7,7 @@
 
 namespace App\Controller\Password;
 
+use App\Controller\AbstractJsonPatchController;
 use App\Controller\EncryptionAwareTrait;
 use App\Controller\Password\Dto\PatchSensitiveDataDto;
 use App\Entity\GroupsPassword;
@@ -18,13 +19,14 @@ use App\Service\Encryption\EncryptionService;
 use Doctrine\ORM\EntityManagerInterface;
 use Exception;
 use Random\RandomException;
-use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Attribute\MapRequestPayload;
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Validator\ConstraintViolation;
 
-class PatchSensitiveDataController extends AbstractController
+class PatchSensitiveDataController extends AbstractJsonPatchController
 {
     use EncryptionAwareTrait;
 
@@ -32,6 +34,7 @@ class PatchSensitiveDataController extends AbstractController
      * Update sensitive data for a password.
      *
      * @param  string  $id
+     * @param  Request  $request
      * @param  EntityManagerInterface  $entityManager
      * @param  PatchSensitiveDataDto  $dto
      * @param  UserPasswordHasherInterface  $passwordHasher
@@ -48,6 +51,7 @@ class PatchSensitiveDataController extends AbstractController
     )]
     public function index(
         string $id,
+        Request $request,
         EntityManagerInterface $entityManager,
         #[MapRequestPayload] PatchSensitiveDataDto $dto,
         UserPasswordHasherInterface $passwordHasher,
@@ -64,7 +68,7 @@ class PatchSensitiveDataController extends AbstractController
         $password = $passwordRepository->findByIds(
             [$id],
             [
-                "PARTIAL p.{id, title, externalId, target, encryptedUsername, encryptedPassword, usernameNonce, passwordNonce, updatedAt, updatedBy}",
+                "PARTIAL p.{id, title, externalId, target, encryptedUsername, encryptedPassword, usernameNonce, passwordNonce, encryptedTotpSecretKey, totpSecretKeyNonce, totpAlgorithm, totpPeriod, totpDigits, updatedAt, updatedBy}",
                 "PARTIAL gp.{group, password, encryptedPasswordKey, encryptionPublicKey, nonce, canWrite}",
                 "PARTIAL g.{id, name}",
             ],
@@ -80,12 +84,36 @@ class PatchSensitiveDataController extends AbstractController
             throw $this->createAccessDeniedException("You don't have permission to update this password.");
         }
 
+        $this->initializePatchData($request);
+
+        $isUsernameUpdate = $this->isPatchRequested('encryptedUsername');
+        $isPasswordUpdate = $this->isPatchRequested('encryptedPassword');
+        $isTotpUpdate = $this->isPatchRequested('totp');
+
+        // Validate that encryptedPassword cannot be null if requested
+        if ($isPasswordUpdate && is_null($dto->encryptedPassword)) {
+            $violation = new ConstraintViolation(
+                "Password cannot be cleared.",
+                null,
+                [],
+                null,
+                "encryptedPassword",
+                null
+            );
+            $this->addViolation($violation);
+            $this->throwViolations();
+        }
+
+        if (!$isUsernameUpdate && !$isPasswordUpdate && !$isTotpUpdate) {
+            return new Response(null, Response::HTTP_NO_CONTENT);
+        }
+
         $decryptionData = $this->findDecryptionData($password);
         if (is_null($decryptionData)) {
             return $this->json([
                 'error' => "Decryption Error",
                 'message' => "No valid decryption key found for this password.",
-            ]);
+            ], 500);
         }
 
         try {
@@ -100,19 +128,26 @@ class PatchSensitiveDataController extends AbstractController
             );
         }
 
-        $isUsernameUpdate = $dto->encryptedUsername !== false;
-        $isPasswordUpdate = $dto->encryptedPassword !== false;
+        // Handle case where only clearing nullable fields (no encryption needed)
+        $isClearUsernameOnly = $isUsernameUpdate && is_null($dto->encryptedUsername);
+        $isClearTotpOnly = $isTotpUpdate && is_null($dto->totp);
+        $needsEncryption = $isPasswordUpdate
+                           || ($isUsernameUpdate && !is_null($dto->encryptedUsername))
+                           || ($isTotpUpdate && !is_null($dto->totp));
 
-        if (!$isUsernameUpdate && !$isPasswordUpdate) {
-            return new Response(null, Response::HTTP_NO_CONTENT);
-        }
-
-        if ($isUsernameUpdate && $dto->encryptedUsername === null && !$isPasswordUpdate) {
+        if (!$needsEncryption) {
             $this->encryptionService->secureMemzero($decryptedPrivateKey);
 
-            $password->setEncryptedUsername(null)
-                     ->setUsernameNonce(null)
-                     ->setUpdatedBy($loggedInUser->getUserIdentifier());
+            if ($isClearUsernameOnly) {
+                $password->setEncryptedUsername(null)
+                         ->setUsernameNonce(null);
+            }
+
+            if ($isClearTotpOnly) {
+                $password->clearTotp();
+            }
+
+            $password->setUpdatedBy($loggedInUser->getUserIdentifier());
 
             $entityManager->flush();
             return new Response(null, Response::HTTP_NO_CONTENT);
@@ -126,17 +161,39 @@ class PatchSensitiveDataController extends AbstractController
 
         $encryptionService->secureMemzero($decryptedPrivateKey);
 
-        if ($isUsernameUpdate && !is_null($dto->encryptedUsername)) {
-            $encryptedUsernameData = $this->encryptPasswordData($dto->encryptedUsername, $decryptedPasswordKey);
+        if ($isUsernameUpdate) {
+            if (is_null($dto->encryptedUsername)) {
+                $password->setEncryptedUsername(null)
+                         ->setUsernameNonce(null);
+            } else {
+                $encryptedUsernameData = $this->encryptPasswordData($dto->encryptedUsername, $decryptedPasswordKey);
 
-            $password->setEncryptedUsername($encryptedUsernameData['encryptedData'])
-                     ->setUsernameNonce($encryptedUsernameData['encryptedDataNonce']);
+                $password->setEncryptedUsername($encryptedUsernameData['encryptedData'])
+                         ->setUsernameNonce($encryptedUsernameData['encryptedDataNonce']);
+            }
         }
 
         if ($isPasswordUpdate) {
             $encryptedPasswordData = $this->encryptPasswordData($dto->encryptedPassword, $decryptedPasswordKey);
             $password->setEncryptedPassword($encryptedPasswordData['encryptedData'])
                      ->setPasswordNonce($encryptedPasswordData['encryptedDataNonce']);
+        }
+
+        if ($isTotpUpdate) {
+            if (is_null($dto->totp)) {
+                $password->clearTotp();
+            } else {
+                $encryptedTotpSecretKeyData = $this->encryptPasswordData(
+                    $dto->totp->encryptedSecretKey,
+                    $decryptedPasswordKey
+                );
+
+                $password->setEncryptedTotpSecretKey($encryptedTotpSecretKeyData['encryptedData'])
+                         ->setTotpSecretKeyNonce($encryptedTotpSecretKeyData['encryptedDataNonce'])
+                         ->setTotpAlgorithm($dto->totp->algorithm)
+                         ->setTotpPeriod($dto->totp->period)
+                         ->setTotpDigits($dto->totp->digits);
+            }
         }
 
         $encryptionService->secureMemzero($decryptedPasswordKey);

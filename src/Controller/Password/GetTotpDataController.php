@@ -2,7 +2,7 @@
 
 /**
  * @author bsteffan
- * @since 2025-06-30
+ * @since 2026-01-29
  */
 
 namespace App\Controller\Password;
@@ -24,12 +24,12 @@ use Symfony\Component\HttpKernel\Attribute\MapRequestPayload;
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use Symfony\Component\Routing\Attribute\Route;
 
-class GetSensitiveDataController extends AbstractController
+class GetTotpDataController extends AbstractController
 {
     use EncryptionAwareTrait;
 
     /**
-     * Get sensitive data for a password.
+     * Get TOTP data for a password.
      *
      * @param  string  $id
      * @param  PasswordRepository  $passwordRepository
@@ -42,8 +42,8 @@ class GetSensitiveDataController extends AbstractController
      * @throws RandomException
      */
     #[Route(
-        "/passwords/{id}/sensitive",
-        name: "api_passwords_id_sensitive",
+        "/passwords/{id}/totp",
+        name: "api_passwords_id_totp",
         requirements: ["id" => "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"],
         methods: ["POST"]
     )]
@@ -64,7 +64,7 @@ class GetSensitiveDataController extends AbstractController
         $password = $passwordRepository->findByIds(
             [$id],
             [
-                "PARTIAL p.{id, encryptedUsername, title, externalId, target, encryptedPassword, usernameNonce, passwordNonce}",
+                "PARTIAL p.{id, title, externalId, target, encryptedTotpSecretKey, totpSecretKeyNonce, totpAlgorithm, totpPeriod, totpDigits}",
                 "PARTIAL gp.{group, password, encryptedPasswordKey, encryptionPublicKey, nonce}",
                 "PARTIAL g.{id, name}",
             ],
@@ -74,6 +74,12 @@ class GetSensitiveDataController extends AbstractController
 
         if (is_null($password) || !$password->hasReadPermission($loggedInUser->getGroupIds())) {
             throw $this->createNotFoundException("Password with id: $id not found.");
+        }
+
+        if (!$password->hasTotp()) {
+            return $this->json([
+                'totp' => null,
+            ]);
         }
 
         $decryptionData = $this->findDecryptionData($password);
@@ -104,37 +110,30 @@ class GetSensitiveDataController extends AbstractController
 
         $encryptionService->secureMemzero($decryptedPrivateKey);
 
-        $decryptedPassword = $encryptionService->decryptPasswordData(
-            $password->getEncryptedPassword(),
-            $password->getPasswordNonce(),
+        $decryptedTotpSecretKey = $encryptionService->decryptPasswordData(
+            $password->getEncryptedTotpSecretKey(),
+            $password->getTotpSecretKeyNonce(),
             $decryptedPasswordKey
         );
 
-        if (!is_null($password->getEncryptedUsername())) {
-            $decryptedUsername = $encryptionService->decryptPasswordData(
-                $password->getEncryptedUsername(),
-                $password->getUsernameNonce(),
-                $decryptedPasswordKey
-            );
-
-            $reEncryptedUsername = $encryptionService->encryptForUser(
-                $decryptedUsername,
-                $loggedInUser->getPublicKey()
-            );
-        }
-
         $encryptionService->secureMemzero($decryptedPasswordKey);
 
-        $reEncryptedPassword = $encryptionService->encryptForUser(
-            $decryptedPassword,
+        $reEncryptedTotpSecretKey = $encryptionService->encryptForUser(
+            $decryptedTotpSecretKey,
             $loggedInUser->getPublicKey()
         );
+
+        $encryptionService->secureMemzero($decryptedTotpSecretKey);
 
         $auditService->log(AuditAction::Read, $password);
 
         return $this->json([
-            'username' => $reEncryptedUsername ?? null,
-            'password' => $reEncryptedPassword,
+            'totp' => [
+                'secretKey' => $reEncryptedTotpSecretKey,
+                'algorithm' => $password->getTotpAlgorithm()->value,
+                'period' => $password->getTotpPeriod()->value,
+                'digits' => $password->getTotpDigits()->value,
+            ],
             'userKeys' => [
                 'privateKey' => $loggedInUser->getEncryptedPrivateKey(),
                 'nonce' => $loggedInUser->getPrivateKeyNonce(),

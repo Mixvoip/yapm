@@ -113,6 +113,8 @@ class PasswordNormalizer implements NormalizerInterface, NormalizerAwareInterfac
         $normalised['description'] = $data->getDescription();
         $normalised['location'] = $data->getLocation();
         $normalised['externalId'] = $data->getExternalId();
+        $normalised['hasTotp'] = $data->hasTotp();
+        $normalised['totpPeriod'] = $data->getTotpPeriod()?->value;
 
         return array_merge($normalised, $this->normalizeMetadata($data));
     }

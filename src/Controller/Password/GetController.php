@@ -38,7 +38,7 @@ class GetController extends AbstractController
         $password = $passwordRepository->findByIds(
             [$id],
             [
-                "PARTIAL p.{id, title, description, location, externalId, target, createdAt, createdBy, updatedAt, updatedBy}",
+                "PARTIAL p.{id, title, description, location, externalId, encryptedTotpSecretKey, totpPeriod, target, createdAt, createdBy, updatedAt, updatedBy}",
                 "PARTIAL f.{id, name}",
                 "PARTIAL gp.{group, password, canWrite}",
                 "PARTIAL g.{id, name, private}",
