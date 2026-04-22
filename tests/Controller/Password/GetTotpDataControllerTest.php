@@ -141,9 +141,11 @@ class GetTotpDataControllerTest extends WebTestCase
         $encrypted = $encryptionService->encryptForServer("InThePassw0rdManager");
 
         return [
-            'encryptedData' => $encrypted['encryptedData'],
-            'clientPublicKey' => $encrypted['clientPublicKey'],
-            'nonce' => $encrypted['nonce'],
+            'encryptedPassword' => [
+                'encryptedData' => $encrypted['encryptedData'],
+                'clientPublicKey' => $encrypted['clientPublicKey'],
+                'nonce' => $encrypted['nonce'],
+            ],
         ];
     }
 }

@@ -7,6 +7,7 @@
 
 namespace App\Controller\Password\Dto;
 
+use App\Controller\Dto\AuthenticationDataDto;
 use App\Controller\Dto\EncryptedClientDataDto;
 use App\Service\Attributes\DefaultPatchConfiguration;
 use Symfony\Component\Validator\Constraints as Assert;
@@ -14,7 +15,7 @@ use Symfony\Component\Validator\Constraints as Assert;
 readonly class PatchSensitiveDataDto
 {
     /**
-     * @param  EncryptedClientDataDto  $encryptedUserPassword
+     * @param  AuthenticationDataDto  $authData
      * @param  EncryptedClientDataDto|null  $encryptedPassword
      * @param  EncryptedClientDataDto|null  $encryptedUsername
      * @param  TotpDataDto|null  $totp  Set complete TOTP (all fields) or null to clear
@@ -25,7 +26,7 @@ readonly class PatchSensitiveDataDto
             Assert\Valid,
             DefaultPatchConfiguration(ignore: true)
         ]
-        public EncryptedClientDataDto $encryptedUserPassword,
+        public AuthenticationDataDto $authData,
 
         #[
             Assert\Valid,

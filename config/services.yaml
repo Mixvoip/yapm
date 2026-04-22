@@ -31,6 +31,12 @@ services:
       $serverPrivateKey: '%env(SERVER_PRIVATE_KEY)%'
       $serverPublicKey: '%env(SERVER_PUBLIC_KEY)%'
 
+  App\Service\WebAuthn\WebAuthnService:
+    arguments:
+      $rpId: '%env(WEBAUTHN_RP_ID)%'
+      $rpName: '%env(WEBAUTHN_RP_NAME)%'
+      $rpOrigin: '%env(WEBAUTHN_RP_ORIGIN)%'
+
   App\EventListener\ResponseListener:
     arguments:
       $allowOrigin: '%env(CORS_ALLOW_ORIGIN)%'

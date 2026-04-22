@@ -18,6 +18,7 @@ use App\Entity\Vault;
 use App\Repository\FolderRepository;
 use App\Repository\PasswordRepository;
 use App\Repository\VaultRepository;
+use App\Repository\WebAuthnCredentialRepository;
 use App\Service\Encryption\EncryptionService;
 use Doctrine\ORM\EntityManagerInterface;
 use Exception;
@@ -41,6 +42,7 @@ class MoveController extends AbstractController
      * @param  EntityManagerInterface  $entityManager
      * @param  UserPasswordHasherInterface  $passwordHasher
      * @param  EncryptionService  $encryptionService
+     * @param  WebAuthnCredentialRepository  $webAuthnCredentialRepository
      *
      * @return Response
      * @throws RandomException
@@ -56,13 +58,15 @@ class MoveController extends AbstractController
         #[MapRequestPayload] MoveDto $dto,
         EntityManagerInterface $entityManager,
         UserPasswordHasherInterface $passwordHasher,
-        EncryptionService $encryptionService
+        EncryptionService $encryptionService,
+        WebAuthnCredentialRepository $webAuthnCredentialRepository
     ): Response {
         /** @var User $loggedInUser */
         $loggedInUser = $this->getUser();
 
         $this->passwordHasher = $passwordHasher;
         $this->encryptionService = $encryptionService;
+        $this->webAuthnCredentialRepository = $webAuthnCredentialRepository;
 
         /** @var PasswordRepository $passwordRepository */
         $passwordRepository = $entityManager->getRepository(Password::class);
@@ -86,7 +90,7 @@ class MoveController extends AbstractController
         }
 
         try {
-            $decryptedPrivateKey = $this->decryptUserPrivateKey($dto->encryptedUserPassword);
+            $decryptedPrivateKey = $this->decryptUserPrivateKeyFromAuth($dto->authData);
         } catch (Exception $e) {
             return $this->json(
                 [

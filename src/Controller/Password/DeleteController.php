@@ -7,11 +7,14 @@
 
 namespace App\Controller\Password;
 
-use App\Controller\Dto\EncryptedClientDataDto;
+use App\Controller\Dto\AuthenticationDataDto;
 use App\Controller\EncryptionAwareTrait;
 use App\Entity\Password;
+use App\Entity\TimeBasedShare;
 use App\Entity\User;
 use App\Repository\PasswordRepository;
+use App\Repository\TimeBasedShareRepository;
+use App\Repository\WebAuthnCredentialRepository;
 use App\Service\Encryption\EncryptionService;
 use Doctrine\ORM\EntityManagerInterface;
 use Exception;
@@ -30,9 +33,10 @@ class DeleteController extends AbstractController
      *
      * @param  string  $id
      * @param  EntityManagerInterface  $entityManager
-     * @param  EncryptedClientDataDto  $encryptedPassword
+     * @param  AuthenticationDataDto  $authData
      * @param  UserPasswordHasherInterface  $passwordHasher
      * @param  EncryptionService  $encryptionService
+     * @param  WebAuthnCredentialRepository  $webAuthnCredentialRepository
      *
      * @return Response
      */
@@ -45,18 +49,20 @@ class DeleteController extends AbstractController
     public function index(
         string $id,
         EntityManagerInterface $entityManager,
-        #[MapRequestPayload] EncryptedClientDataDto $encryptedPassword,
+        #[MapRequestPayload] AuthenticationDataDto $authData,
         UserPasswordHasherInterface $passwordHasher,
-        EncryptionService $encryptionService
+        EncryptionService $encryptionService,
+        WebAuthnCredentialRepository $webAuthnCredentialRepository
     ): Response {
         /** @var User $loggedInUser */
         $loggedInUser = $this->getUser();
 
         $this->passwordHasher = $passwordHasher;
         $this->encryptionService = $encryptionService;
+        $this->webAuthnCredentialRepository = $webAuthnCredentialRepository;
 
         try {
-            $this->decryptUserPrivateKey($encryptedPassword);
+            $this->decryptUserPrivateKeyFromAuth($authData);
         } catch (Exception $e) {
             return $this->json(
                 [
@@ -89,6 +95,11 @@ class DeleteController extends AbstractController
         }
 
         $password->markAsDeleted($loggedInUser->getUserIdentifier());
+
+        /** @var TimeBasedShareRepository $timeBasedShareRepository */
+        $timeBasedShareRepository = $entityManager->getRepository(TimeBasedShare::class);
+        $timeBasedShareRepository->expireBySourcePasswordId($id);
+
         $entityManager->flush();
 
         return new Response(null, Response::HTTP_NO_CONTENT);

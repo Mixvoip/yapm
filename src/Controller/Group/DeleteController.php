@@ -7,11 +7,12 @@
 
 namespace App\Controller\Group;
 
-use App\Controller\Dto\EncryptedClientDataDto;
+use App\Controller\Dto\AuthenticationDataDto;
 use App\Controller\EncryptionAwareTrait;
 use App\Entity\Group;
 use App\Entity\User;
 use App\Repository\GroupRepository;
+use App\Repository\WebAuthnCredentialRepository;
 use App\Service\Encryption\EncryptionService;
 use Doctrine\ORM\EntityManagerInterface;
 use Exception;
@@ -32,9 +33,10 @@ class DeleteController extends AbstractController
      *
      * @param  string  $id
      * @param  EntityManagerInterface  $entityManager
-     * @param  EncryptedClientDataDto  $encryptedPassword
+     * @param  AuthenticationDataDto  $authData
      * @param  UserPasswordHasherInterface  $passwordHasher
      * @param  EncryptionService  $encryptionService
+     * @param  WebAuthnCredentialRepository  $webAuthnCredentialRepository
      *
      * @return Response
      */
@@ -48,18 +50,20 @@ class DeleteController extends AbstractController
     public function index(
         string $id,
         EntityManagerInterface $entityManager,
-        #[MapRequestPayload] EncryptedClientDataDto $encryptedPassword,
+        #[MapRequestPayload] AuthenticationDataDto $authData,
         UserPasswordHasherInterface $passwordHasher,
-        EncryptionService $encryptionService
+        EncryptionService $encryptionService,
+        WebAuthnCredentialRepository $webAuthnCredentialRepository
     ): Response {
         /** @var User $loggedInUser */
         $loggedInUser = $this->getUser();
 
         $this->passwordHasher = $passwordHasher;
         $this->encryptionService = $encryptionService;
+        $this->webAuthnCredentialRepository = $webAuthnCredentialRepository;
 
         try {
-            $this->decryptUserPrivateKey($encryptedPassword);
+            $this->decryptUserPrivateKeyFromAuth($authData);
         } catch (Exception $e) {
             return $this->json(
                 [

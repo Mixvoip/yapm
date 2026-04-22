@@ -7,13 +7,13 @@
 
 namespace App\Controller\Group\Dto;
 
-use App\Controller\Dto\EncryptedClientDataDto;
+use App\Controller\Dto\AuthenticationDataDto;
 use Symfony\Component\Validator\Constraints as Assert;
 
 readonly class PatchDto
 {
     /**
-     * @param  EncryptedClientDataDto  $encryptedPassword
+     * @param  AuthenticationDataDto  $authData
      * @param  string[]|null  $managers
      * @param  string[]|null  $users
      */
@@ -22,7 +22,7 @@ readonly class PatchDto
             Assert\NotBlank,
             Assert\Valid
         ]
-        private EncryptedClientDataDto $encryptedPassword,
+        private AuthenticationDataDto $authData,
 
         #[
             Assert\Type('array'),
@@ -45,11 +45,11 @@ readonly class PatchDto
     }
 
     /**
-     * @return EncryptedClientDataDto
+     * @return AuthenticationDataDto
      */
-    public function getEncryptedPassword(): EncryptedClientDataDto
+    public function getAuthData(): AuthenticationDataDto
     {
-        return $this->encryptedPassword;
+        return $this->authData;
     }
 
     /**

@@ -20,6 +20,7 @@ use App\Entity\User;
 use App\Message\PartialAccessCleanUpMessage;
 use App\Repository\GroupRepository;
 use App\Repository\PasswordRepository;
+use App\Repository\WebAuthnCredentialRepository;
 use App\Service\Encryption\EncryptionService;
 use Doctrine\ORM\EntityManagerInterface;
 use Exception;
@@ -46,6 +47,7 @@ class PatchPermissionsController extends AbstractController
      * @param  PatchPermissionsDto  $dto
      * @param  UserPasswordHasherInterface  $passwordHasher
      * @param  EncryptionService  $encryptionService
+     * @param  WebAuthnCredentialRepository  $webAuthnCredentialRepository
      *
      * @return Response
      * @throws RandomException
@@ -62,12 +64,14 @@ class PatchPermissionsController extends AbstractController
         #[MapRequestPayload] PatchPermissionsDto $dto,
         UserPasswordHasherInterface $passwordHasher,
         EncryptionService $encryptionService,
-        MessageBusInterface $messageBus
+        MessageBusInterface $messageBus,
+        WebAuthnCredentialRepository $webAuthnCredentialRepository
     ): Response {
         /** @var User $loggedInUser */
         $loggedInUser = $this->getUser();
         $this->passwordHasher = $passwordHasher;
         $this->encryptionService = $encryptionService;
+        $this->webAuthnCredentialRepository = $webAuthnCredentialRepository;
 
         /** @var PasswordRepository $passwordRepository */
         $passwordRepository = $entityManager->getRepository(Password::class);
@@ -151,7 +155,7 @@ class PatchPermissionsController extends AbstractController
 
         // Decrypt user's private key and the password key for re-encryption
         try {
-            $decryptedPrivateKey = $this->decryptUserPrivateKey($dto->encryptedPassword);
+            $decryptedPrivateKey = $this->decryptUserPrivateKeyFromAuth($dto->authData);
         } catch (Exception $e) {
             return $this->json(
                 [

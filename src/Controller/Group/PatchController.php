@@ -15,6 +15,7 @@ use App\Entity\User;
 use App\Normalizer\GroupNormalizer;
 use App\Repository\GroupRepository;
 use App\Repository\UserRepository;
+use App\Repository\WebAuthnCredentialRepository;
 use App\Service\Encryption\EncryptionService;
 use Doctrine\ORM\EntityManagerInterface;
 use Exception;
@@ -38,6 +39,7 @@ class PatchController extends AbstractController
      * @param  EntityManagerInterface  $entityManager
      * @param  UserPasswordHasherInterface  $passwordHasher
      * @param  EncryptionService  $encryptionService
+     * @param  WebAuthnCredentialRepository  $webAuthnCredentialRepository
      *
      * @return JsonResponse
      * @throws RandomException
@@ -53,16 +55,18 @@ class PatchController extends AbstractController
         #[MapRequestPayload] PatchDto $patchDto,
         EntityManagerInterface $entityManager,
         UserPasswordHasherInterface $passwordHasher,
-        EncryptionService $encryptionService
+        EncryptionService $encryptionService,
+        WebAuthnCredentialRepository $webAuthnCredentialRepository
     ): JsonResponse {
         /** @var User $loggedInUser */
         $loggedInUser = $this->getUser();
 
         $this->passwordHasher = $passwordHasher;
         $this->encryptionService = $encryptionService;
+        $this->webAuthnCredentialRepository = $webAuthnCredentialRepository;
 
         try {
-            $decryptedPrivateKey = $this->decryptUserPrivateKey($patchDto->getEncryptedPassword());
+            $decryptedPrivateKey = $this->decryptUserPrivateKeyFromAuth($patchDto->getAuthData());
         } catch (Exception $e) {
             return $this->json(
                 [

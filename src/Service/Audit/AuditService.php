@@ -43,15 +43,15 @@ readonly class AuditService
         AuditAction $auditAction,
         AuditableEntityInterface $auditableEntity,
         ?array $oldValues = null,
-        ?array $newValues = null
+        ?array $newValues = null,
+        ?User $user = null
     ): void {
-        /** @var User $currentUser */
-        $currentUser = $this->security->getUser();
+        $currentUser = $user ?? $this->security->getUser();
 
         $userId = null;
         $userEmail = null;
 
-        if (!is_null($currentUser)) {
+        if (!is_null($currentUser) && $currentUser instanceof User) {
             $userId = $currentUser->getId();
             $userEmail = $currentUser->getEmail();
         }

@@ -61,6 +61,7 @@ class UserNormalizer implements NormalizerInterface, NormalizerAwareInterface
         $normalised['admin'] = $data->isAdmin();
         $normalised['verified'] = $data->isVerified();
         $normalised['active'] = $data->isActive();
+        $normalised['hasPasskeys'] = $data->hasWebAuthnCredentials();
 
         return array_merge($normalised, $this->normalizeMetadata($data));
     }

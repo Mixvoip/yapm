@@ -7,13 +7,13 @@
 
 namespace App\Controller\Password\Dto;
 
-use App\Controller\Dto\EncryptedClientDataDto;
+use App\Controller\Dto\AuthenticationDataDto;
 use Symfony\Component\Validator\Constraints as Assert;
 
 class MoveDto
 {
     /**
-     * @param  EncryptedClientDataDto  $encryptedUserPassword
+     * @param  AuthenticationDataDto  $authData
      * @param  string  $vaultId
      * @param  string|null  $folderId
      */
@@ -22,7 +22,7 @@ class MoveDto
             Assert\NotBlank,
             Assert\Valid
         ]
-        public EncryptedClientDataDto $encryptedUserPassword,
+        public AuthenticationDataDto $authData,
 
         #[Assert\NotBlank]
         public string $vaultId,

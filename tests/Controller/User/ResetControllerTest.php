@@ -7,10 +7,15 @@
 
 namespace App\Tests\Controller\User;
 
+use App\Entity\Folder;
+use App\Entity\FoldersGroup;
 use App\Entity\Group;
+use App\Entity\Password;
 use App\Entity\RefreshToken;
 use App\Entity\Vault;
+use App\Repository\FolderRepository;
 use App\Repository\GroupRepository;
+use App\Repository\PasswordRepository;
 use App\Repository\RefreshTokenRepository;
 use App\Repository\VaultRepository;
 use App\Service\Encryption\EncryptionService;
@@ -185,6 +190,85 @@ class ResetControllerTest extends WebTestCase
     }
 
     /**
+     * Test that reset succeeds even when the user has soft-deleted content in their private vault.
+     *
+     * @return void
+     * @throws RandomException
+     */
+    public function testResetWithSoftDeletedContent(): void
+    {
+        $userId = "aaaaaaaa-bbbb-cccc-dddd-000000000000"; // user0
+        // user0's root password ID from UserPrivateVaultFixtures (tail = 000000000000)
+        $passwordId = "44444440-bbbb-cccc-dddd-000000000000";
+
+        $emailServiceMock = $this->createMock(\App\Service\EmailService::class);
+        $emailServiceMock->expects($this->once())
+                         ->method('sendInvitationEmail');
+        $this->container->set(\App\Service\EmailService::class, $emailServiceMock);
+
+        /** @var EntityManagerInterface $entityManager */
+        $entityManager = $this->container->get('doctrine.orm.entity_manager');
+
+        // Soft-delete a password in the private vault
+        /** @var PasswordRepository $passwordRepository */
+        $passwordRepository = $entityManager->getRepository(Password::class);
+        $password = $passwordRepository->find($passwordId);
+        $this->assertNotNull($password, "Password should exist before soft-delete");
+        $password->markAsDeleted('test');
+        $entityManager->flush();
+        $entityManager->clear();
+
+        // Perform reset - this previously failed with FK constraint violation
+        $body = $this->makePasswordPayload();
+        $this->postAsUser("/users/$userId/reset", $body, "admin@example.com");
+        $this->assertResponseStatusCodeSame(204);
+    }
+
+    /**
+     * Test that reset succeeds when a shared vault folder was shared with the user's private group.
+     *
+     * @return void
+     * @throws RandomException
+     */
+    public function testResetWithSharedVaultFolderLinkedToPrivateGroup(): void
+    {
+        $userId = "aaaaaaaa-bbbb-cccc-dddd-000000000000"; // user0
+        $privateGroupId = "11111111-bbbb-cccc-dddd-000000000000"; // user0's private group
+        $sharedFolderId = "aaaaaaaa-bbbb-cccc-dddd-fd0000000000"; // "main" folder in dev vault
+
+        $emailServiceMock = $this->createMock(\App\Service\EmailService::class);
+        $emailServiceMock->expects($this->once())
+                         ->method('sendInvitationEmail');
+        $this->container->set(\App\Service\EmailService::class, $emailServiceMock);
+
+        /** @var EntityManagerInterface $entityManager */
+        $entityManager = $this->container->get('doctrine.orm.entity_manager');
+
+        // Link a shared vault folder to the user's private group
+        /** @var GroupRepository $groupRepository */
+        $groupRepository = $entityManager->getRepository(Group::class);
+        $privateGroup = $groupRepository->find($privateGroupId);
+        $this->assertNotNull($privateGroup);
+
+        /** @var FolderRepository $folderRepository */
+        $folderRepository = $entityManager->getRepository(Folder::class);
+        $sharedFolder = $folderRepository->find($sharedFolderId);
+        $this->assertNotNull($sharedFolder);
+
+        $fg = new FoldersGroup()->setFolder($sharedFolder)
+                                ->setGroup($privateGroup)
+                                ->setCreatedBy('test');
+        $entityManager->persist($fg);
+        $entityManager->flush();
+        $entityManager->clear();
+
+        // Perform reset - this previously failed with EntityNotFoundException
+        $body = $this->makePasswordPayload();
+        $this->postAsUser("/users/$userId/reset", $body, "admin@example.com");
+        $this->assertResponseStatusCodeSame(204);
+    }
+
+    /**
      * Create encrypted password payload for admin user.
      *
      * @param  string  $password
@@ -199,9 +283,11 @@ class ResetControllerTest extends WebTestCase
         $encrypted = $encryptionService->encryptForServer($password);
 
         return [
-            'encryptedData' => $encrypted['encryptedData'],
-            'clientPublicKey' => $encrypted['clientPublicKey'],
-            'nonce' => $encrypted['nonce'],
+            'encryptedPassword' => [
+                'encryptedData' => $encrypted['encryptedData'],
+                'clientPublicKey' => $encrypted['clientPublicKey'],
+                'nonce' => $encrypted['nonce'],
+            ],
         ];
     }
 }

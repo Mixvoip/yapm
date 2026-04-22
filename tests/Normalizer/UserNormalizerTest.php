@@ -53,11 +53,12 @@ class UserNormalizerTest extends KernelTestCase
                     ],
                     "admin" => true,
                     "verified" => true,
+                    "active" => true,
+                    "hasPasskeys" => false,
                     "createdAt" => "2025-04-23 14:27:02",
                     "createdBy" => "fixtures",
                     "updatedAt" => null,
                     "updatedBy" => null,
-                    "active" => true,
                 ],
             ],
             "minimised" => [
@@ -81,11 +82,12 @@ class UserNormalizerTest extends KernelTestCase
                     ],
                     "admin" => true,
                     "verified" => true,
+                    "active" => true,
+                    "hasPasskeys" => false,
                     "createdAt" => "2025-04-23 14:27:02",
                     "createdBy" => "fixtures",
                     "updatedAt" => null,
                     "updatedBy" => null,
-                    "active" => true,
                     "groups" => [
                         [
                             'id' => '11111111-bbbb-cccc-dddd-a00000000000',

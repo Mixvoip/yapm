@@ -21,10 +21,14 @@ tags:
     description: Password related operations
   - name: Share Processes
     description: Share process related operations
+  - name: Time-Based Shares
+    description: Time-limited password sharing between users
   - name: Users
     description: User management
   - name: Vaults
     description: Vault related operations
+  - name: WebAuthn
+    description: WebAuthn/Passkey registration, authentication, and credential management
 
 paths:
   /audit-logs:
@@ -288,11 +292,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ClientEncryptedData"
+              $ref: "#/components/schemas/AuthenticationData"
         description: >
-          The request body must contain the user's encrypted password data
-          used for authentication:
-          `encryptedData`, `clientPublicKey`, and `nonce`.
+          The request body must contain the user's authentication data
+          (either encryptedPassword or prfData).
       responses:
         204:
           description: Folder deleted Successfully
@@ -651,11 +654,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ClientEncryptedData"
+              $ref: "#/components/schemas/AuthenticationData"
         description: >
-          The request body must contain the user's encrypted password data
-          used for authentication:
-          `encryptedData`, `clientPublicKey`, and `nonce`.
+          The request body must contain the user's authentication data
+          (either encryptedPassword or prfData).
       responses:
         204:
           description: Group deleted Successfully
@@ -921,11 +923,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ClientEncryptedData"
+              $ref: "#/components/schemas/AuthenticationData"
         description: >
-          The request body must contain the user's encrypted password data
-          used for authentication:
-          `encryptedData`, `clientPublicKey`, and `nonce`.
+          The request body must contain the user's authentication data
+          (either encryptedPassword or prfData).
       responses:
         204:
           description: Password deleted Successfully
@@ -995,11 +996,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
   /passwords/{id}/sensitive:
-    get:
+    post:
       tags:
         - Passwords
       summary: Retrieve sensitive data for a password
-      description: Retrieve sensitive data for a password by its id encrypted with the user's public key
+      description: Retrieve sensitive data for a password by its id encrypted with the user's public key. Requires authentication via password or PRF.
       parameters:
         - $ref: "#/components/parameters/id"
       requestBody:
@@ -1007,11 +1008,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ClientEncryptedData'
+              $ref: '#/components/schemas/AuthenticationData'
         description: >
-          The request body must contain the user's encrypted password data
-          used for authentication:
-          `encryptedData`, `clientPublicKey`, and `nonce`.
+          The request body must contain the user's authentication data
+          (either encryptedPassword or prfData).
       responses:
         200:
           description: Password sensitive data
@@ -1045,8 +1045,8 @@ paths:
             schema:
               type: object
               properties:
-                encryptedUserPassword:
-                  $ref: '#/components/schemas/ClientEncryptedData'
+                authData:
+                  $ref: '#/components/schemas/AuthenticationData'
                 encryptedPassword:
                   $ref: '#/components/schemas/ClientEncryptedData'
                 encryptedUsername:
@@ -1090,7 +1090,7 @@ paths:
       tags:
         - Passwords
       summary: Retrieve TOTP data for a password
-      description: Retrieve TOTP data for a password by its id encrypted with the user's public key
+      description: Retrieve TOTP data for a password by its id encrypted with the user's public key. Requires authentication via password or PRF.
       parameters:
         - $ref: "#/components/parameters/id"
       requestBody:
@@ -1098,11 +1098,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ClientEncryptedData'
+              $ref: '#/components/schemas/AuthenticationData'
         description: >
-          The request body must contain the user's encrypted password data
-          used for authentication:
-          `encryptedData`, `clientPublicKey`, and `nonce`.
+          The request body must contain the user's authentication data
+          (either encryptedPassword or prfData).
       responses:
         200:
           description: Password TOTP data
@@ -1122,6 +1121,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /passwords/import:
+    post:
+      tags:
+        - Passwords
+      summary: Bulk import passwords
+      description: >
+        Import multiple passwords from encrypted data. Each item is processed independently;
+        failures on individual items do not prevent other items from succeeding.
+        Groups are inherited from the target folder or vault (non-partial only).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportPasswordsRequest'
+      responses:
+        200:
+          description: Import results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportPasswordsResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        422:
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
   /passwords/search:
     get:
       tags:
@@ -1559,7 +1592,7 @@ paths:
       tags:
         - Users
       summary: Reset a user to invited state
-      description: Reset user account, delete all associated data, and send new invitation email
+      description: Reset user account, delete all associated data, and send new invitation email. Requires authentication via password or PRF.
       parameters:
         - $ref: "#/components/parameters/id"
       requestBody:
@@ -1567,11 +1600,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ClientEncryptedData'
-            example:
-              encryptedData: "QzZ3VnZxV1pKZFp1aHh0V1VqQkF1N1lrd0pFb3F1V2E"
-              clientPublicKey: "QzZ3VnZxV1pKZFp1aHh0V1VqQkF1N1lrd0pFb3F1V2E"
-              nonce: "QzZ3VnZxV1pKZFp1aHh0V1VqQkF1N1lrd0pFb3F1V2E"
+              $ref: '#/components/schemas/AuthenticationData'
       responses:
         204:
           description: User successfully reset and invitation email sent
@@ -1599,6 +1628,53 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /change-password:
+    post:
+      tags:
+        - Users
+      summary: Change master password
+      description: >
+        Change the authenticated user's master password. Requires authentication via password or PRF.
+        Re-encrypts the user's private key with the new password using Argon2ID key derivation.
+        The user's public key and all group/password encryption remain unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                authData:
+                  $ref: "#/components/schemas/AuthenticationData"
+                newEncryptedPassword:
+                  $ref: "#/components/schemas/ClientEncryptedData"
+              required:
+                - authData
+                - newEncryptedPassword
+        description: >
+          The request body must contain authentication data (current password or PRF)
+          and the new password encrypted with the server's public key.
+      responses:
+        204:
+          description: Password changed successfully
+        400:
+          description: New password does not meet strength requirements
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        401:
+          description: Authentication failed (invalid current password or PRF)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        422:
+          description: Unprocessable Entity (invalid request body)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnprocessableEntityErrorResponse'
   /users/{id}/vaults:
     get:
       tags:
@@ -1885,11 +1961,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ClientEncryptedData"
+              $ref: "#/components/schemas/AuthenticationData"
         description: >
-          The request body must contain the user's encrypted password data
-          used for authentication:
-          `encryptedData`, `clientPublicKey`, and `nonce`.
+          The request body must contain the user's authentication data
+          (either encryptedPassword or prfData).
       responses:
         204:
           description: Vault deleted Successfully
@@ -1998,6 +2073,456 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /time-based-shares:
+    post:
+      tags:
+        - Time-Based Shares
+      summary: Create a time-based share
+      description: Create a time-limited share of a password with another user. Requires the sharer's encrypted master password for re-encryption.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTimeBasedShareRequest'
+      responses:
+        201:
+          description: Share created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeBasedShareResponse'
+        400:
+          description: Validation error (self-share, inactive recipient, incomplete setup)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Authentication failed (invalid master password)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Password not found or no access
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        409:
+          description: An active share for this password already exists for this recipient
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /time-based-shares/my-shares:
+    get:
+      tags:
+        - Time-Based Shares
+      summary: Get current user's active shares
+      description: Returns all non-expired shares where the current user is either the creator or the recipient.
+      responses:
+        200:
+          description: List of active shares
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TimeBasedShareResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+  /time-based-shares/{id}:
+    get:
+      tags:
+        - Time-Based Shares
+      summary: Get share metadata
+      description: Get metadata for a time-based share (no sensitive data). Accessible by both the creator and the recipient.
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        200:
+          description: Share metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeBasedShareResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Share not found, expired, or user has no access
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /time-based-shares/{id}/sensitive-data:
+    post:
+      tags:
+        - Time-Based Shares
+      summary: Get encrypted sensitive data
+      description: Returns the encrypted password and username data for a share. Only accessible by the recipient. Tracks first access time. Requires authentication via password or PRF.
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthenticationData'
+        description: >
+          The request body must contain the user's authentication data
+          (either encryptedPassword or prfData).
+      responses:
+        200:
+          description: Encrypted sensitive data with user keys for decryption
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeBasedShareSensitiveDataResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Share not found, expired, or user is not the recipient
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /time-based-shares/{id}/revoke:
+    post:
+      tags:
+        - Time-Based Shares
+      summary: Revoke a share
+      description: Revokes an active share by setting its expiry to now. Only the creator can revoke a share.
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        204:
+          description: Share revoked successfully
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Share not found, already expired, or user is not the creator
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /webauthn/register/options:
+    get:
+      tags:
+        - WebAuthn
+      summary: Get registration options
+      description: >
+        Get WebAuthn registration options for the authenticated user.
+        Returns the public key creation options, a PRF salt for key derivation,
+        and the user's encrypted keys (so the client can decrypt the private key during registration).
+      responses:
+        200:
+          description: Registration options
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  publicKeyOptions:
+                    type: object
+                    description: W3C WebAuthn PublicKeyCredentialCreationOptions
+                  prfSalt:
+                    type: string
+                    description: Base64-encoded PRF salt for key derivation
+                  userKeys:
+                    $ref: '#/components/schemas/UserKeysResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+  /webauthn/register/verify:
+    post:
+      tags:
+        - WebAuthn
+      summary: Verify registration
+      description: >
+        Verify the WebAuthn registration response and store the credential.
+        Requires master password verification.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRegistrationRequest'
+      responses:
+        201:
+          description: Credential registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    $ref: '#/components/schemas/Id'
+                  name:
+                    type: string
+        400:
+          description: Registration verification failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        401:
+          description: Master password verification failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+  /webauthn/authenticate/options:
+    get:
+      tags:
+        - WebAuthn
+      summary: Get authentication options
+      description: >
+        Get WebAuthn authentication options for sensitive operations (authenticated user).
+        Includes PRF salt per credential so the client can derive the encryption key.
+      responses:
+        200:
+          description: Authentication options
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  publicKeyOptions:
+                    type: object
+                    description: W3C WebAuthn PublicKeyCredentialRequestOptions
+                  prfSalts:
+                    type: object
+                    additionalProperties:
+                      type: string
+                    description: Map of base64url credential ID to base64-encoded PRF salt
+                  credentialSettings:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        cacheOnUse:
+                          type: boolean
+                    description: Per-credential settings
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: User has no registered passkeys
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /webauthn/login/options:
+    post:
+      tags:
+        - WebAuthn
+      summary: Get login options
+      description: >
+        Get WebAuthn login options for unauthenticated passkey login.
+        Returns credentials scoped to the user identified by email.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: User email address
+              required:
+                - email
+      responses:
+        200:
+          description: Login options
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionToken:
+                    type: string
+                    description: Session token for the verification step
+                  publicKeyOptions:
+                    type: object
+                    description: W3C WebAuthn PublicKeyCredentialRequestOptions
+                  prfSalts:
+                    type: object
+                    additionalProperties:
+                      type: string
+                    description: Map of base64url credential ID to base64-encoded PRF salt
+        401:
+          description: Invalid credentials (user not found or no passkeys)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+  /webauthn/login/discoverable/options:
+    get:
+      tags:
+        - WebAuthn
+      summary: Get discoverable login options
+      description: >
+        Get login options for discoverable credential (usernameless) passkey login.
+        No user context needed — the browser shows all resident credentials for the RP.
+      security: []
+      responses:
+        200:
+          description: Discoverable login options
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionToken:
+                    type: string
+                    description: Session token for the verification step
+                  publicKeyOptions:
+                    type: object
+                    description: W3C WebAuthn PublicKeyCredentialRequestOptions (empty allowCredentials)
+  /webauthn/login/verify:
+    post:
+      tags:
+        - WebAuthn
+      summary: Verify login assertion
+      description: >
+        Verify a WebAuthn login assertion and return JWT tokens.
+        Works for both discoverable and non-discoverable credential flows.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sessionToken:
+                  type: string
+                  description: Session token from the login options response
+                credential:
+                  type: object
+                  description: The serialized PublicKeyCredential from the browser
+              required:
+                - sessionToken
+                - credential
+      responses:
+        200:
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+  /webauthn/credentials:
+    get:
+      tags:
+        - WebAuthn
+      summary: List credentials
+      description: List all WebAuthn credentials for the authenticated user
+      responses:
+        200:
+          description: List of credentials
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebAuthnCredential'
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+  /webauthn/credentials/{id}:
+    patch:
+      tags:
+        - WebAuthn
+      summary: Update a credential
+      description: Update a WebAuthn credential's settings (e.g. cacheOnUse)
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchCredentialRequest'
+      responses:
+        200:
+          description: Credential updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebAuthnCredential'
+        404:
+          description: Credential not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /webauthn/credentials/{id}/delete:
+    post:
+      tags:
+        - WebAuthn
+      summary: Delete a credential
+      description: Delete a WebAuthn credential. Requires master password verification.
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientEncryptedData'
+        description: >
+          Master password encrypted with the server's public key for verification.
+      responses:
+        204:
+          description: Credential deleted successfully
+        401:
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        404:
+          description: Credential not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   parameters:
     id:
@@ -2282,8 +2807,12 @@ components:
               example: true
             active:
               type: boolean
-              description: Is the use active
+              description: Is the user active
               example: true
+            hasPasskeys:
+              type: boolean
+              description: Whether the user has registered WebAuthn passkeys
+              example: false
         - $ref: '#/components/schemas/EditorFields'
     UserWithGroups:
       allOf:
@@ -2350,8 +2879,8 @@ components:
     PatchGroupRequest:
       type: object
       properties:
-        encryptedPassword:
-          $ref: "#/components/schemas/ClientEncryptedData"
+        authData:
+          $ref: "#/components/schemas/AuthenticationData"
         users:
           type: array
           description: Users in this group
@@ -2834,8 +3363,8 @@ components:
     PatchPermissionsWithPartial:
       type: object
       properties:
-        encryptedPassword:
-          $ref: "#/components/schemas/ClientEncryptedData"
+        authData:
+          $ref: "#/components/schemas/AuthenticationData"
         groups:
           type: array
           items:
@@ -2849,12 +3378,12 @@ components:
           default: false
           description: Set to true to apply the permissions to all sub resources
       required:
-        - encryptedPassword
+        - authData
     PatchPermissions:
       type: object
       properties:
-        encryptedPassword:
-          $ref: "#/components/schemas/ClientEncryptedData"
+        authData:
+          $ref: "#/components/schemas/AuthenticationData"
         groups:
           type: array
           items:
@@ -2864,7 +3393,7 @@ components:
           items:
             $ref: "#/components/schemas/RequestUserPermission"
       required:
-        - encryptedPassword
+        - authData
     ShareProcessMinimised:
       type: object
       properties:
@@ -3004,6 +3533,91 @@ components:
         - title
         - encryptedPassword
         - vaultId
+    ImportPasswordsRequest:
+      type: object
+      properties:
+        items:
+          type: array
+          description: List of passwords to import (1-100 items)
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ImportPasswordItem'
+      required:
+        - items
+    ImportPasswordItem:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Title of the password
+          maxLength: 255
+          example: My Imported Password
+        vaultId:
+          $ref: '#/components/schemas/Id'
+        encryptedPassword:
+          $ref: '#/components/schemas/ClientEncryptedData'
+        encryptedUsername:
+          allOf:
+            - $ref: '#/components/schemas/ClientEncryptedData'
+            - nullable: true
+        target:
+          type: string
+          description: Target URL or identifier
+          maxLength: 255
+          example: https://example.com
+          nullable: true
+        location:
+          type: string
+          description: Location of the password
+          maxLength: 255
+          example: floor 1
+          nullable: true
+        externalId:
+          type: string
+          description: External identifier
+          maxLength: 255
+          example: ext-123
+          nullable: true
+        folderId:
+          allOf:
+            - $ref: '#/components/schemas/NullableId'
+            - description: Folder to place the password in (null for vault root)
+      required:
+        - title
+        - vaultId
+        - encryptedPassword
+    ImportPasswordsResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportPasswordResult'
+        successCount:
+          type: integer
+          description: Number of successfully imported passwords
+          example: 3
+        failureCount:
+          type: integer
+          description: Number of failed imports
+          example: 1
+    ImportPasswordResult:
+      type: object
+      properties:
+        row:
+          type: integer
+          description: Index of the item in the request array
+          example: 0
+        success:
+          type: boolean
+          description: Whether the import succeeded
+          example: true
+        error:
+          type: string
+          description: Error message (only present on failure)
+          example: Invalid vault ID.
+          nullable: true
     PasswordSensitiveDataResponse:
       type: object
       properties:
@@ -3014,20 +3628,7 @@ components:
         password:
           $ref: "#/components/schemas/UserEncryptedData"
         userKeys:
-          type: object
-          properties:
-            privateKey:
-              type: string
-              description: Encrypted private key of the user
-              example: verySecretKey
-            nonce:
-              type: string
-              description: Nonce used to encrypt the data
-              example: verySecretKey
-            salt:
-              type: string
-              description: Salt used to encrypt the users private key
-              example: verySecretKey
+          $ref: "#/components/schemas/UserKeysResponse"
     TotpAlgorithm:
       type: string
       enum: [sha1, sha256, sha512]
@@ -3080,17 +3681,217 @@ components:
             - $ref: "#/components/schemas/TotpDataResponse"
             - nullable: true
         userKeys:
+          $ref: "#/components/schemas/UserKeysResponse"
+    TimeBasedShareDuration:
+      type: string
+      enum: [1h, 2h, 24h]
+      description: Duration for the time-based share
+      example: 1h
+    CreateTimeBasedShareRequest:
+      type: object
+      properties:
+        passwordId:
+          $ref: "#/components/schemas/Id"
+        recipientId:
+          $ref: "#/components/schemas/Id"
+        duration:
+          $ref: "#/components/schemas/TimeBasedShareDuration"
+        authData:
+          $ref: "#/components/schemas/AuthenticationData"
+      required:
+        - passwordId
+        - recipientId
+        - duration
+        - authData
+    TimeBasedShareResponse:
+      type: object
+      description: Time-based share response (always includes both sharedBy and sharedWith)
+      properties:
+        id:
+          $ref: "#/components/schemas/Id"
+        passwordTitle:
+          type: string
+          example: My Password
+        sharedBy:
+          $ref: "#/components/schemas/UserMinimised"
+        sharedWith:
+          $ref: "#/components/schemas/UserMinimised"
+        expiresAt:
+          $ref: "#/components/schemas/DateTime"
+        accessedAt:
+          allOf:
+            - $ref: "#/components/schemas/DateTime"
+            - nullable: true
+        createdAt:
+          $ref: "#/components/schemas/DateTime"
+    TimeBasedShareSensitiveDataResponse:
+      type: object
+      description: Encrypted sensitive data for a time-based share
+      properties:
+        password:
           type: object
           properties:
-            privateKey:
+            encryptedData:
               type: string
-              description: Encrypted private key of the user
-              example: verySecretKey
             nonce:
               type: string
-              description: Nonce used to encrypt the data
-              example: verySecretKey
+            encryptionPublicKey:
+              type: string
+        username:
+          type: object
+          nullable: true
+          properties:
+            encryptedData:
+              type: string
+            nonce:
+              type: string
+            encryptionPublicKey:
+              type: string
+        userKeys:
+          $ref: "#/components/schemas/UserKeysResponse"
+    PrfClientData:
+      type: object
+      description: PRF-based authentication data from a WebAuthn passkey
+      properties:
+        credentialId:
+          type: string
+          description: Base64url-encoded WebAuthn credential ID
+        encryptedData:
+          type: string
+          description: PRF-derived key encrypted for the server
+        clientPublicKey:
+          type: string
+          description: Client's transport encryption public key
+        nonce:
+          type: string
+          description: Transport encryption nonce
+      required:
+        - credentialId
+        - encryptedData
+        - clientPublicKey
+        - nonce
+    AuthenticationData:
+      type: object
+      description: >
+        Authentication data supporting either password or PRF (passkey) authentication.
+        Exactly one of encryptedPassword or prfData must be provided.
+      properties:
+        encryptedPassword:
+          allOf:
+            - $ref: "#/components/schemas/ClientEncryptedData"
+            - nullable: true
+          description: Password-based authentication
+        prfData:
+          allOf:
+            - $ref: "#/components/schemas/PrfClientData"
+            - nullable: true
+          description: PRF-based (passkey) authentication
+    UserKeysResponse:
+      type: object
+      description: >
+        User's encryption keys for client-side decryption. The format varies based on the authentication method used.
+      oneOf:
+        - type: object
+          title: Password-based keys
+          properties:
+            authMethod:
+              type: string
+              enum: [password]
+            privateKey:
+              type: string
+              description: User's private key encrypted with Argon2ID-derived key
+            nonce:
+              type: string
+              description: Nonce used to encrypt the private key
             salt:
               type: string
-              description: Salt used to encrypt the users private key
-              example: verySecretKey
+              description: Salt used for Argon2ID key derivation
+          required:
+            - authMethod
+            - privateKey
+            - nonce
+            - salt
+        - type: object
+          title: PRF-based keys
+          properties:
+            authMethod:
+              type: string
+              enum: [prf]
+            privateKey:
+              type: string
+              description: User's private key encrypted with PRF-derived key
+            nonce:
+              type: string
+              description: Nonce used for PRF encryption
+            credentialId:
+              type: string
+              description: Base64-encoded credential ID
+            prfSalt:
+              type: string
+              description: Base64-encoded PRF salt for key derivation
+          required:
+            - authMethod
+            - privateKey
+            - nonce
+            - credentialId
+            - prfSalt
+    WebAuthnCredential:
+      type: object
+      description: A registered WebAuthn passkey credential
+      allOf:
+        - type: object
+          properties:
+            id:
+              $ref: "#/components/schemas/Id"
+            name:
+              type: string
+              description: User-provided name for this passkey
+              example: "MacBook Touch ID"
+            cacheOnUse:
+              type: boolean
+              description: Whether to cache the credential on use
+              example: true
+            lastUsedAt:
+              allOf:
+                - $ref: "#/components/schemas/DateTime"
+                - nullable: true
+              description: When the credential was last used for authentication
+        - $ref: "#/components/schemas/EditorFields"
+    VerifyRegistrationRequest:
+      type: object
+      properties:
+        credential:
+          type: object
+          description: The serialized PublicKeyCredential from the browser
+        name:
+          type: string
+          description: User-provided name for this passkey
+          maxLength: 255
+        prfSalt:
+          type: string
+          description: Base64-encoded PRF salt used during registration
+        prfEncryptedPrivateKey:
+          type: string
+          description: User's private key re-encrypted with the PRF-derived key
+        prfPrivateKeyNonce:
+          type: string
+          description: Nonce used for PRF encryption
+        encryptedPassword:
+          $ref: "#/components/schemas/ClientEncryptedData"
+        cacheOnUse:
+          type: boolean
+          default: true
+          description: Whether to cache the credential on use
+      required:
+        - credential
+        - name
+        - prfSalt
+        - prfEncryptedPrivateKey
+        - prfPrivateKeyNonce
+        - encryptedPassword
+    PatchCredentialRequest:
+      type: object
+      properties:
+        cacheOnUse:
+          type: boolean
+          description: Whether to cache the credential on use

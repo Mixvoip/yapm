@@ -13,8 +13,11 @@ use App\Controller\Password\Dto\PatchSensitiveDataDto;
 use App\Entity\GroupsPassword;
 use App\Entity\GroupsUser;
 use App\Entity\Password;
+use App\Entity\TimeBasedShare;
 use App\Entity\User;
 use App\Repository\PasswordRepository;
+use App\Repository\TimeBasedShareRepository;
+use App\Repository\WebAuthnCredentialRepository;
 use App\Service\Encryption\EncryptionService;
 use Doctrine\ORM\EntityManagerInterface;
 use Exception;
@@ -39,6 +42,7 @@ class PatchSensitiveDataController extends AbstractJsonPatchController
      * @param  PatchSensitiveDataDto  $dto
      * @param  UserPasswordHasherInterface  $passwordHasher
      * @param  EncryptionService  $encryptionService
+     * @param  WebAuthnCredentialRepository  $webAuthnCredentialRepository
      *
      * @return Response
      * @throws RandomException
@@ -55,13 +59,15 @@ class PatchSensitiveDataController extends AbstractJsonPatchController
         EntityManagerInterface $entityManager,
         #[MapRequestPayload] PatchSensitiveDataDto $dto,
         UserPasswordHasherInterface $passwordHasher,
-        EncryptionService $encryptionService
+        EncryptionService $encryptionService,
+        WebAuthnCredentialRepository $webAuthnCredentialRepository
     ): Response {
         /** @var User $loggedInUser */
         $loggedInUser = $this->getUser();
 
         $this->passwordHasher = $passwordHasher;
         $this->encryptionService = $encryptionService;
+        $this->webAuthnCredentialRepository = $webAuthnCredentialRepository;
 
         /** @var PasswordRepository $passwordRepository */
         $passwordRepository = $entityManager->getRepository(Password::class);
@@ -117,7 +123,7 @@ class PatchSensitiveDataController extends AbstractJsonPatchController
         }
 
         try {
-            $decryptedPrivateKey = $this->decryptUserPrivateKey($dto->encryptedUserPassword);
+            $decryptedPrivateKey = $this->decryptUserPrivateKeyFromAuth($dto->authData);
         } catch (Exception $e) {
             return $this->json(
                 [
@@ -199,6 +205,13 @@ class PatchSensitiveDataController extends AbstractJsonPatchController
         $encryptionService->secureMemzero($decryptedPasswordKey);
 
         $password->setUpdatedBy($loggedInUser->getUserIdentifier());
+
+        // Invalidate active time-based shares when password or username changes
+        if ($isPasswordUpdate || $isUsernameUpdate) {
+            /** @var TimeBasedShareRepository $timeBasedShareRepository */
+            $timeBasedShareRepository = $entityManager->getRepository(TimeBasedShare::class);
+            $timeBasedShareRepository->expireBySourcePasswordId($id);
+        }
 
         $entityManager->flush();
 

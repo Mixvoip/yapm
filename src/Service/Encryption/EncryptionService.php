@@ -514,6 +514,115 @@ class EncryptionService
     }
 
     /**
+     * Decrypt user private key using a PRF-derived key (no Argon2ID derivation).
+     * The PRF-derived key is a direct 32-byte symmetric key from the WebAuthn PRF extension.
+     *
+     * @param  string  $prfDerivedKey  Raw 32-byte key
+     * @param  string  $encryptedPrivateKey  Base64-encoded encrypted private key
+     * @param  string  $nonce  Base64-encoded nonce
+     *
+     * @return string  Base64-encoded decrypted private key
+     */
+    public function decryptUserPrivateKeyWithPrfKey(
+        string $prfDerivedKey,
+        string $encryptedPrivateKey,
+        string $nonce
+    ): string {
+        try {
+            if (strlen($prfDerivedKey) !== SODIUM_CRYPTO_SECRETBOX_KEYBYTES) {
+                throw new RuntimeException('Invalid PRF-derived key length');
+            }
+
+            $privateKey = sodium_crypto_secretbox_open(
+                base64_decode($encryptedPrivateKey),
+                base64_decode($nonce),
+                $prfDerivedKey
+            );
+
+            if ($privateKey === false) {
+                throw new RuntimeException('Failed to decrypt user private key - invalid PRF key');
+            }
+
+            return base64_encode($privateKey);
+        } catch (SodiumException $e) {
+            throw new RuntimeException('Failed to decrypt user private key with PRF key: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Decrypt a user's private key using a PRF-derived key that arrives via transport encryption.
+     *
+     * Handles the full flow: transport decryption → base64 decode → private key decryption → memzero.
+     *
+     * @param  string  $encryptedPrfKey  Transport-encrypted PRF key
+     * @param  string  $clientPublicKey  Client's transport public key
+     * @param  string  $transportNonce  Transport encryption nonce
+     * @param  string  $encryptedPrivateKey  Base64-encoded PRF-encrypted private key
+     * @param  string  $privateKeyNonce  Base64-encoded nonce for private key decryption
+     *
+     * @return string  Base64-encoded decrypted private key
+     */
+    public function decryptPrivateKeyWithPrfTransport(
+        string $encryptedPrfKey,
+        string $clientPublicKey,
+        string $transportNonce,
+        string $encryptedPrivateKey,
+        string $privateKeyNonce
+    ): string {
+        $base64PrfKey = $this->decryptFromClient($encryptedPrfKey, $clientPublicKey, $transportNonce);
+        $prfDerivedKey = base64_decode($base64PrfKey);
+        $this->secureMemzero($base64PrfKey);
+
+        try {
+            return $this->decryptUserPrivateKeyWithPrfKey($prfDerivedKey, $encryptedPrivateKey, $privateKeyNonce);
+        } finally {
+            $this->secureMemzero($prfDerivedKey);
+        }
+    }
+
+    /**
+     * Re-encrypt an existing user private key with a new password.
+     * Used when the user changes their master password.
+     *
+     * @param  string  $privateKey  Base64-encoded decrypted private key
+     * @param  string  $newPassword  The new password
+     *
+     * @return array
+     * @throws RandomException
+     */
+    #[ArrayShape([
+        'encryptedPrivateKey' => "string",
+        'privateKeyNonce' => "string",
+        'keySalt' => "string",
+    ])]
+    public function reEncryptUserPrivateKey(string $privateKey, string $newPassword): array
+    {
+        try {
+            $keySalt = random_bytes(SODIUM_CRYPTO_PWHASH_SALTBYTES);
+            $derivedKey = $this->deriveKeyFromPassword($newPassword, $keySalt);
+
+            $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+            $rawPrivateKey = base64_decode($privateKey);
+            $encryptedPrivateKey = sodium_crypto_secretbox(
+                $rawPrivateKey,
+                $nonce,
+                $derivedKey
+            );
+
+            sodium_memzero($rawPrivateKey);
+            sodium_memzero($derivedKey);
+
+            return [
+                'encryptedPrivateKey' => base64_encode($encryptedPrivateKey),
+                'privateKeyNonce' => base64_encode($nonce),
+                'keySalt' => base64_encode($keySalt),
+            ];
+        } catch (SodiumException $e) {
+            throw new RuntimeException('Failed to re-encrypt user private key: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Derive key from password using Argon2ID
      *
      * @param  string  $password

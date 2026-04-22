@@ -37,7 +37,7 @@ class PatchControllerTest extends WebTestCase
     {
         $encryptedPassword = $this->encryptionService->encryptForServer($userPassword);
         $body = [
-            'encryptedPassword' => $encryptedPassword,
+            'authData' => ['encryptedPassword' => $encryptedPassword],
             'users' => [
                 "aaaaaaaa-bbbb-cccc-dddd-a00000000000",
                 "aaaaaaaa-bbbb-cccc-dddd-000000000001",
@@ -63,7 +63,7 @@ class PatchControllerTest extends WebTestCase
         array $nonUpdatedUserIds
     ): void {
         $encryptedPassword = $this->encryptionService->encryptForServer($userPassword);
-        $body['encryptedPassword'] = $encryptedPassword;
+        $body['authData'] = ['encryptedPassword' => $encryptedPassword];
         $this->patchAsUser("/groups/aaaaaaaa-bbbb-cccc-dddd-900000000002", $body, $userEmail);
         $group = $this->groupRepository->findOneBy(['name' => "Users"]);
         $expectedResponse = $this->container->get("serializer")->normalize(
@@ -90,7 +90,7 @@ class PatchControllerTest extends WebTestCase
     {
         $encryptedPassword = $this->encryptionService->encryptForServer("InThePassw0rdManager");
         $body = [
-            'encryptedPassword' => $encryptedPassword,
+            'authData' => ['encryptedPassword' => $encryptedPassword],
             'users' => ["aaaaaaaa-bbbb-cccc-dddd-a00000000000"],
             'managers' => ["aaaaaaaa-bbbb-cccc-dddd-a00000000000"],
         ];
@@ -113,7 +113,7 @@ class PatchControllerTest extends WebTestCase
     public function testInvalidData(array $body, string $userEmail, string $userPassword, string $errorMessage): void
     {
         $encryptedPassword = $this->encryptionService->encryptForServer($userPassword);
-        $body['encryptedPassword'] = $encryptedPassword;
+        $body['authData'] = ['encryptedPassword' => $encryptedPassword];
         $this->patchAsUser("/groups/aaaaaaaa-bbbb-cccc-dddd-900000000002", $body, $userEmail);
         $this->assertResponse(
             400,
@@ -128,7 +128,7 @@ class PatchControllerTest extends WebTestCase
     public function testInvalidDto(array $body, array $expectedResponse): void
     {
         $encryptedPassword = $this->encryptionService->encryptForServer("InThePassw0rdManager");
-        $body['encryptedPassword'] = $encryptedPassword;
+        $body['authData'] = ['encryptedPassword' => $encryptedPassword];
         $this->patchAsUser("/groups/aaaaaaaa-bbbb-cccc-dddd-900000000000", $body, "admin@example.com");
         $this->assertResponse(422, $expectedResponse);
     }
