@@ -50,7 +50,7 @@ setGidBit:
 	find . -type d | sudo xargs chmod g+s
 
 messengerRestart:
-	bin/console messenger:stop-workers
+	sudo -u www-data php bin/console messenger:stop-workers
 
 permissions: setOwnerGroup setGidBit
 

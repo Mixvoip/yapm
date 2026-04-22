@@ -28,7 +28,8 @@
 		"symfony/serializer": "7.4.*",
 		"symfony/uid": "7.4.*",
 		"symfony/validator": "7.4.*",
-		"symfony/yaml": "7.4.*"
+		"symfony/yaml": "7.4.*",
+		"web-auth/webauthn-lib": "^5.2"
 	},
 	"require-dev": {
 		"dama/doctrine-test-bundle": "^8.3",

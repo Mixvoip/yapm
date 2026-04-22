@@ -1525,7 +1525,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
 final class App
 {
     /**
-     * @param  ConfigType  $config
+     * @param ConfigType $config
      *
      * @psalm-return ConfigType
      */
@@ -1602,7 +1602,7 @@ namespace Symfony\Component\Routing\Loader\Configurator;
 final class Routes
 {
     /**
-     * @param  RoutesConfig  $config
+     * @param RoutesConfig $config
      *
      * @psalm-return RoutesConfig
      */

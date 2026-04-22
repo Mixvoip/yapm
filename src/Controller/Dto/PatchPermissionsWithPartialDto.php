@@ -12,14 +12,14 @@ use Symfony\Component\Validator\Constraints as Assert;
 readonly class PatchPermissionsWithPartialDto
 {
     /**
-     * @param  EncryptedClientDataDto  $encryptedPassword
+     * @param  AuthenticationDataDto  $authData
      * @param  GroupPermissionWithPartialDto[]  $groups
      * @param  UserPermissionWithPartialDto[]  $userPermissions
      * @param  bool  $cascade
      */
     public function __construct(
         #[Assert\Valid]
-        public EncryptedClientDataDto $encryptedPassword,
+        public AuthenticationDataDto $authData,
 
         #[
             Assert\Valid,

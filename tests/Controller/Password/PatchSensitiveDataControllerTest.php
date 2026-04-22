@@ -29,7 +29,7 @@ class PatchSensitiveDataControllerTest extends WebTestCase
         $passwordId = 'aaaaaaaa-bbbb-cccc-dddd-999999999999';
 
         $body = [
-            'encryptedUserPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
         ];
 
         $this->patchAsUser("/passwords/$passwordId/sensitive", $body, 'admin@example.com');
@@ -53,7 +53,7 @@ class PatchSensitiveDataControllerTest extends WebTestCase
         $passwordId = 'aaaccaaa-bbbb-cccc-dddd-000000000000';
 
         $body = [
-            'encryptedUserPassword' => $this->makePwdPayload('user0password'),
+            'authData' => $this->makePwdPayload('user0password'),
             'encryptedPassword' => $this->makeEncryptedData('newpassword'),
         ];
 
@@ -72,7 +72,7 @@ class PatchSensitiveDataControllerTest extends WebTestCase
         $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041';
 
         $body = [
-            'encryptedUserPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             // No encryptedPassword, encryptedUsername, or totp provided
         ];
 
@@ -96,7 +96,7 @@ class PatchSensitiveDataControllerTest extends WebTestCase
         $this->assertFalse($passwordBefore->hasTotp(), 'Password should not have TOTP initially');
 
         $body = [
-            'encryptedUserPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'totp' => [
                 'encryptedSecretKey' => $this->makeEncryptedData('JBSWY3DPEHPK3PXP'),
                 'algorithm' => 'sha1',
@@ -127,7 +127,7 @@ class PatchSensitiveDataControllerTest extends WebTestCase
         $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000042';
 
         $body = [
-            'encryptedUserPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'totp' => [
                 'encryptedSecretKey' => $this->makeEncryptedData('NEWSECRET'),
                 'algorithm' => 'sha256',
@@ -163,7 +163,7 @@ class PatchSensitiveDataControllerTest extends WebTestCase
         $this->assertFalse($passwordBefore->hasTotp(), 'Password should not have TOTP initially');
 
         $body = [
-            'encryptedUserPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'totp' => null,
         ];
 
@@ -191,7 +191,7 @@ class PatchSensitiveDataControllerTest extends WebTestCase
         $this->assertTrue($passwordBefore->hasTotp(), 'Password should have TOTP initially');
 
         $body = [
-            'encryptedUserPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'totp' => null,
         ];
 
@@ -218,7 +218,7 @@ class PatchSensitiveDataControllerTest extends WebTestCase
         $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000051';
 
         $body = [
-            'encryptedUserPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'encryptedUsername' => null,
             'totp' => [
                 'encryptedSecretKey' => $this->makeEncryptedData('SECRETKEY'),
@@ -249,7 +249,7 @@ class PatchSensitiveDataControllerTest extends WebTestCase
         $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041';
 
         $body = [
-            'encryptedUserPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'totp' => [
                 'encryptedSecretKey' => $this->makeEncryptedData('SECRETKEY'),
                 'algorithm' => 'invalid', // Invalid algorithm
@@ -275,7 +275,7 @@ class PatchSensitiveDataControllerTest extends WebTestCase
 
         // Update password and add TOTP in the same request
         $body = [
-            'encryptedUserPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'encryptedPassword' => $this->makeEncryptedData('newpassword'),
             'totp' => [
                 'encryptedSecretKey' => $this->makeEncryptedData('NEWSECRET'),
@@ -313,9 +313,11 @@ class PatchSensitiveDataControllerTest extends WebTestCase
         $encrypted = $encryptionService->encryptForServer($password);
 
         return [
-            'encryptedData' => $encrypted['encryptedData'],
-            'clientPublicKey' => $encrypted['clientPublicKey'],
-            'nonce' => $encrypted['nonce'],
+            'encryptedPassword' => [
+                'encryptedData' => $encrypted['encryptedData'],
+                'clientPublicKey' => $encrypted['clientPublicKey'],
+                'nonce' => $encrypted['nonce'],
+            ],
         ];
     }
 

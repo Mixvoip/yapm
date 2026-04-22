@@ -26,8 +26,8 @@ class PatchPermissionsControllerTest extends WebTestCase
         $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041';
 
         // Inject real encryptedPassword payload if placeholder is present
-        if (isset($body['encryptedPassword']) && ($body['encryptedPassword']['encryptedData'] ?? null) === 'to-be-replaced') {
-            $body['encryptedPassword'] = $this->makePwdPayload();
+        if (isset($body['authData']['encryptedPassword']) && ($body['authData']['encryptedPassword']['encryptedData'] ?? null) === 'to-be-replaced') {
+            $body['authData'] = $this->makePwdPayload();
         }
 
         $this->patchAsUser("/passwords/$passwordId/permissions", $body, 'admin@example.com');
@@ -42,7 +42,7 @@ class PatchPermissionsControllerTest extends WebTestCase
         $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041'; // PROD folder dev passwords -> admin group only
 
         $body = [
-            'encryptedPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'groups' => [
                 // Keep only admin group but set canWrite=false -> should be rejected
                 [
@@ -83,7 +83,7 @@ class PatchPermissionsControllerTest extends WebTestCase
         $updatedByBefore = $passwordBefore->getUpdatedBy();
 
         // Prepare encrypted password for this run
-        $body['encryptedPassword'] = $this->makePwdPayload();
+        $body['authData'] = $this->makePwdPayload();
 
         // Perform single API call for this scenario
         $this->patchAsUser("/passwords/$passwordId/permissions", $body, 'admin@example.com');
@@ -132,7 +132,7 @@ class PatchPermissionsControllerTest extends WebTestCase
         $this->assertNotNull($passwordBefore, 'Password should exist in fixtures');
 
         $body = [
-            'encryptedPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'groups' => [
                 [
                     'groupId' => 'aaaaaaaa-bbbb-cccc-dddd-900000000000', // admin only
@@ -170,21 +170,23 @@ class PatchPermissionsControllerTest extends WebTestCase
         $encrypted = $encryptionService->encryptForServer("InThePassw0rdManager");
 
         return [
-            'encryptedData' => $encrypted['encryptedData'],
-            'clientPublicKey' => $encrypted['clientPublicKey'],
-            'nonce' => $encrypted['nonce'],
+            'encryptedPassword' => [
+                'encryptedData' => $encrypted['encryptedData'],
+                'clientPublicKey' => $encrypted['clientPublicKey'],
+                'nonce' => $encrypted['nonce'],
+            ],
         ];
     }
 
     #[ArrayShape([
-        'missing encryptedPassword' => 'array',
+        'missing authData' => 'array',
         'empty groups and users' => 'array',
         'invalid group element type' => 'array',
     ])]
     public static function provideBadDtoCases(): array
     {
         return [
-            'missing encryptedPassword' => [
+            'missing authData' => [
                 [
                     'groups' => [
                         [
@@ -197,8 +199,8 @@ class PatchPermissionsControllerTest extends WebTestCase
                     'error' => "Unprocessable Entity",
                     'message' => [
                         [
-                            'parameter' => "encryptedPassword",
-                            'message' => "This value should be of type App\Controller\Dto\EncryptedClientDataDto.",
+                            'parameter' => "authData",
+                            'message' => "This value should be of type App\Controller\Dto\AuthenticationDataDto.",
                             'code' => null,
                         ],
                     ],
@@ -206,11 +208,13 @@ class PatchPermissionsControllerTest extends WebTestCase
             ],
             'empty groups and users' => [
                 [
-                    'encryptedPassword' => [
-                        // filled at runtime in test method
-                        'encryptedData' => 'to-be-replaced',
-                        'clientPublicKey' => 'to-be-replaced',
-                        'nonce' => 'to-be-replaced',
+                    'authData' => [
+                        'encryptedPassword' => [
+                            // filled at runtime in test method
+                            'encryptedData' => 'to-be-replaced',
+                            'clientPublicKey' => 'to-be-replaced',
+                            'nonce' => 'to-be-replaced',
+                        ],
                     ],
                     'groups' => [],
                     'userPermissions' => [],
@@ -223,10 +227,12 @@ class PatchPermissionsControllerTest extends WebTestCase
             ],
             'invalid group element type' => [
                 [
-                    'encryptedPassword' => [
-                        'encryptedData' => 'to-be-replaced',
-                        'clientPublicKey' => 'to-be-replaced',
-                        'nonce' => 'to-be-replaced',
+                    'authData' => [
+                        'encryptedPassword' => [
+                            'encryptedData' => 'to-be-replaced',
+                            'clientPublicKey' => 'to-be-replaced',
+                            'nonce' => 'to-be-replaced',
+                        ],
                     ],
                     'groups' => [123],
                 ],
@@ -258,11 +264,13 @@ class PatchPermissionsControllerTest extends WebTestCase
         return [
             'add manager read-only' => [
                 'body' => [
-                    'encryptedPassword' => [
-                        // Placeholder; will be replaced in test with a real encrypted payload
-                        'encryptedData' => 'to-be-replaced',
-                        'clientPublicKey' => 'to-be-replaced',
-                        'nonce' => 'to-be-replaced',
+                    'authData' => [
+                        'encryptedPassword' => [
+                            // Placeholder; will be replaced in test with a real encrypted payload
+                            'encryptedData' => 'to-be-replaced',
+                            'clientPublicKey' => 'to-be-replaced',
+                            'nonce' => 'to-be-replaced',
+                        ],
                     ],
                     'groups' => [
                         [
@@ -280,10 +288,12 @@ class PatchPermissionsControllerTest extends WebTestCase
             ],
             'admin only no-change' => [
                 'body' => [
-                    'encryptedPassword' => [
-                        'encryptedData' => 'to-be-replaced',
-                        'clientPublicKey' => 'to-be-replaced',
-                        'nonce' => 'to-be-replaced',
+                    'authData' => [
+                        'encryptedPassword' => [
+                            'encryptedData' => 'to-be-replaced',
+                            'clientPublicKey' => 'to-be-replaced',
+                            'nonce' => 'to-be-replaced',
+                        ],
                     ],
                     'groups' => [
                         [
@@ -310,7 +320,7 @@ class PatchPermissionsControllerTest extends WebTestCase
         $passwordRepository = $this->container->get('doctrine')->getRepository(Password::class);
 
         $body = [
-            'encryptedPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'groups' => [
                 [
                     'groupId' => 'aaaaaaaa-bbbb-cccc-dddd-900000000000', // admin group
@@ -352,7 +362,7 @@ class PatchPermissionsControllerTest extends WebTestCase
         $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041';
 
         $body = [
-            'encryptedPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'groups' => [],
             'userPermissions' => [
                 [
@@ -404,7 +414,7 @@ class PatchPermissionsControllerTest extends WebTestCase
         $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041';
 
         $body = [
-            'encryptedPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'groups' => [
                 [
                     'groupId' => 'aaaaaaaa-bbbb-cccc-dddd-900000000000',
@@ -433,7 +443,7 @@ class PatchPermissionsControllerTest extends WebTestCase
         $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041';
 
         $body = [
-            'encryptedPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'groups' => [
                 [
                     'groupId' => 'aaaaaaaa-bbbb-cccc-dddd-900000000000',
@@ -472,7 +482,7 @@ class PatchPermissionsControllerTest extends WebTestCase
         $passwordId = 'aaacdaaa-bbbb-cccc-dddd-000000000041';
 
         $body = [
-            'encryptedPassword' => $this->makePwdPayload(),
+            'authData' => $this->makePwdPayload(),
             'groups' => [],
             'userPermissions' => [
                 [

@@ -7,13 +7,14 @@
 
 namespace App\Controller\Password;
 
-use App\Controller\Dto\EncryptedClientDataDto;
+use App\Controller\Dto\AuthenticationDataDto;
 use App\Controller\EncryptionAwareTrait;
 use App\Entity\Enums\AuditAction;
 use App\Entity\GroupsPassword;
 use App\Entity\GroupsUser;
 use App\Entity\User;
 use App\Repository\PasswordRepository;
+use App\Repository\WebAuthnCredentialRepository;
 use App\Service\Audit\AuditService;
 use App\Service\Encryption\EncryptionService;
 use Exception;
@@ -35,8 +36,9 @@ class GetTotpDataController extends AbstractController
      * @param  PasswordRepository  $passwordRepository
      * @param  EncryptionService  $encryptionService
      * @param  UserPasswordHasherInterface  $passwordHasher
-     * @param  EncryptedClientDataDto  $encryptedPassword
+     * @param  AuthenticationDataDto  $authData
      * @param  AuditService  $auditService
+     * @param  WebAuthnCredentialRepository  $webAuthnCredentialRepository
      *
      * @return JsonResponse
      * @throws RandomException
@@ -52,14 +54,16 @@ class GetTotpDataController extends AbstractController
         PasswordRepository $passwordRepository,
         EncryptionService $encryptionService,
         UserPasswordHasherInterface $passwordHasher,
-        #[MapRequestPayload] EncryptedClientDataDto $encryptedPassword,
-        AuditService $auditService
+        #[MapRequestPayload] AuthenticationDataDto $authData,
+        AuditService $auditService,
+        WebAuthnCredentialRepository $webAuthnCredentialRepository
     ): JsonResponse {
         /** @var User $loggedInUser */
         $loggedInUser = $this->getUser();
 
         $this->passwordHasher = $passwordHasher;
         $this->encryptionService = $encryptionService;
+        $this->webAuthnCredentialRepository = $webAuthnCredentialRepository;
 
         $password = $passwordRepository->findByIds(
             [$id],
@@ -91,7 +95,7 @@ class GetTotpDataController extends AbstractController
         }
 
         try {
-            $decryptedPrivateKey = $this->decryptUserPrivateKey($encryptedPassword);
+            $decryptedPrivateKey = $this->decryptUserPrivateKeyFromAuth($authData);
         } catch (Exception $e) {
             return $this->json(
                 [
@@ -134,11 +138,7 @@ class GetTotpDataController extends AbstractController
                 'period' => $password->getTotpPeriod()->value,
                 'digits' => $password->getTotpDigits()->value,
             ],
-            'userKeys' => [
-                'privateKey' => $loggedInUser->getEncryptedPrivateKey(),
-                'nonce' => $loggedInUser->getPrivateKeyNonce(),
-                'salt' => $loggedInUser->getKeySalt(),
-            ],
+            'userKeys' => $this->buildUserKeysResponse($loggedInUser),
         ]);
     }
 }

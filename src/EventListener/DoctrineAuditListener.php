@@ -227,6 +227,11 @@ class DoctrineAuditListener
             return $value->__toString();
         }
 
+        // Base64-encode binary strings that are not valid UTF-8
+        if (is_string($value) && !mb_check_encoding($value, 'UTF-8')) {
+            return base64_encode($value);
+        }
+
         return $value;
     }
 }

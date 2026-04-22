@@ -7,8 +7,9 @@
 
 namespace App\Controller\User;
 
-use App\Controller\Dto\EncryptedClientDataDto;
+use App\Controller\Dto\AuthenticationDataDto;
 use App\Controller\EncryptionAwareTrait;
+use App\Domain\AppConstants;
 use App\Entity\Group;
 use App\Entity\RefreshToken;
 use App\Entity\User;
@@ -17,6 +18,7 @@ use App\Repository\GroupRepository;
 use App\Repository\RefreshTokenRepository;
 use App\Repository\UserRepository;
 use App\Repository\VaultRepository;
+use App\Repository\WebAuthnCredentialRepository;
 use App\Service\EmailService;
 use App\Service\Encryption\EncryptionService;
 use Doctrine\ORM\EntityManagerInterface;
@@ -40,10 +42,11 @@ class ResetController extends AbstractController
      *
      * @param  string  $id
      * @param  EntityManagerInterface  $entityManager
-     * @param  EncryptedClientDataDto  $encryptedPassword
+     * @param  AuthenticationDataDto  $authData
      * @param  UserPasswordHasherInterface  $passwordHasher
      * @param  EncryptionService  $encryptionService
      * @param  EmailService  $emailService
+     * @param  WebAuthnCredentialRepository  $webAuthnCredentialRepository
      *
      * @return Response
      * @throws RandomException
@@ -58,20 +61,22 @@ class ResetController extends AbstractController
     public function reset(
         string $id,
         EntityManagerInterface $entityManager,
-        #[MapRequestPayload] EncryptedClientDataDto $encryptedPassword,
+        #[MapRequestPayload] AuthenticationDataDto $authData,
         UserPasswordHasherInterface $passwordHasher,
         EncryptionService $encryptionService,
-        EmailService $emailService
+        EmailService $emailService,
+        WebAuthnCredentialRepository $webAuthnCredentialRepository
     ): Response {
         /** @var User $loggedInUser */
         $loggedInUser = $this->getUser();
 
         $this->passwordHasher = $passwordHasher;
         $this->encryptionService = $encryptionService;
+        $this->webAuthnCredentialRepository = $webAuthnCredentialRepository;
 
         // Validate admin's password
         try {
-            $this->decryptUserPrivateKey($encryptedPassword);
+            $this->decryptUserPrivateKeyFromAuth($authData);
         } catch (Exception $e) {
             return $this->json(
                 [
@@ -120,6 +125,12 @@ class ResetController extends AbstractController
         }
         $user->getGroupUsers()->clear();
 
+        // Suspend the soft-delete filter for the entire reset operation (including flush).
+        // This ensures Doctrine's cascade removal includes soft-deleted entities (preventing
+        // FK constraint violations), and that proxy initialization during flush can resolve
+        // references to soft-deleted entities in shared vaults.
+        $entityManager->getFilters()->suspend(AppConstants::EXCLUDE_DELETED_FILTER);
+
         /** @var VaultRepository $vaultRepository */
         $vaultRepository = $entityManager->getRepository(Vault::class);
         /** @var Vault $privateVault */
@@ -136,6 +147,8 @@ class ResetController extends AbstractController
         $refreshTokenRepository = $entityManager->getRepository(RefreshToken::class);
         $refreshTokenRepository->invalidateAllForUser($user->getEmail());
 
+        $webAuthnCredentialRepository->deleteAllForUser($user);
+
         $user->setPassword(null)
              ->setVerified(false)
              ->setVerificationToken(bin2hex(random_bytes(16)))
@@ -148,6 +161,8 @@ class ResetController extends AbstractController
 
         $entityManager->persist($user);
         $entityManager->flush();
+
+        $entityManager->getFilters()->restore(AppConstants::EXCLUDE_DELETED_FILTER);
 
         try {
             $emailService->sendInvitationEmail($user);

@@ -2,7 +2,7 @@
 
 namespace App\Message;
 
-use App\Controller\Dto\EncryptedClientDataDto;
+use App\Controller\Dto\AuthenticationDataDto;
 use App\Entity\Enums\AuditAction;
 use App\Entity\Enums\ShareItem\Status as ItemStatus;
 use App\Entity\Enums\ShareItem\TargetType as ItemTargetType;
@@ -12,6 +12,7 @@ use App\Entity\Enums\ShareProcess\TargetType as ProcessTargetType;
 use App\Entity\Folder;
 use App\Entity\Password;
 use App\Service\Encryption\EncryptionService;
+use App\Service\Utility\Base64UrlHelper;
 use DateTimeImmutable;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
@@ -91,7 +92,7 @@ class ShareProcessMessageHandler
             $this->createShareItems($proc['id'], $passwordIds, $folderIds);
 
             // Decrypt the user's private key ONCE per processing run
-            $decryptedPrivateKey = $this->decryptUserPrivateKey($user, $message->encryptedClientData);
+            $decryptedPrivateKey = $this->decryptUserPrivateKey($user, $message->authData);
 
             $this->processShareItemsBulk($proc, $user, $decryptedPrivateKey);
 
@@ -1285,16 +1286,35 @@ class ShareProcessMessageHandler
     }
 
     /**
-     * Decrypt the private key of a user.
+     * Decrypt the private key of a user using either password or PRF authentication.
      *
      * @param  array  $userRow
-     * @param  EncryptedClientDataDto  $encryptedPassword
+     * @param  AuthenticationDataDto  $authData
      *
      * @return string
      */
     private function decryptUserPrivateKey(
         array $userRow,
-        EncryptedClientDataDto $encryptedPassword
+        AuthenticationDataDto $authData
+    ): string {
+        if (!is_null($authData->encryptedPassword)) {
+            return $this->decryptUserPrivateKeyWithPassword($userRow, $authData->encryptedPassword);
+        }
+
+        return $this->decryptUserPrivateKeyWithPrf($userRow, $authData->prfData);
+    }
+
+    /**
+     * Decrypt the private key using the user's master password.
+     *
+     * @param  array  $userRow
+     * @param  \App\Controller\Dto\EncryptedClientDataDto  $encryptedPassword
+     *
+     * @return string
+     */
+    private function decryptUserPrivateKeyWithPassword(
+        array $userRow,
+        \App\Controller\Dto\EncryptedClientDataDto $encryptedPassword
     ): string {
         $plainTextPassword = $this->encryptionService->decryptFromClient(
             $encryptedPassword->encryptedData,
@@ -1311,6 +1331,43 @@ class ShareProcessMessageHandler
 
         $this->encryptionService->secureMemzero($plainTextPassword);
         return $decryptedPrivateKey;
+    }
+
+    /**
+     * Decrypt the private key using a PRF-derived key.
+     *
+     * @param  array  $userRow
+     * @param  \App\Controller\Dto\PrfClientDataDto  $prfData
+     *
+     * @return string
+     */
+    private function decryptUserPrivateKeyWithPrf(
+        array $userRow,
+        \App\Controller\Dto\PrfClientDataDto $prfData
+    ): string {
+        // Find the credential's PRF-encrypted private key
+        $credential = $this->db()->fetchAssociative(
+            "SELECT prf_encrypted_private_key, prf_private_key_nonce
+             FROM webauthn_credentials
+             WHERE credential_id = :credentialId AND user_id = :userId",
+            [
+                'credentialId' => Base64UrlHelper::decode($prfData->credentialId),
+                'userId' => $userRow['id'],
+            ]
+        );
+
+        if (!$credential) {
+            throw new RuntimeException('Invalid passkey credential for share process.');
+        }
+
+        // Decrypt transport → base64_decode → decrypt private key → memzero (all handled by service)
+        return $this->encryptionService->decryptPrivateKeyWithPrfTransport(
+            $prfData->encryptedData,
+            $prfData->clientPublicKey,
+            $prfData->nonce,
+            $credential['prf_encrypted_private_key'],
+            $credential['prf_private_key_nonce']
+        );
     }
 
     /**

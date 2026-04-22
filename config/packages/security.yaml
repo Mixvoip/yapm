@@ -49,6 +49,7 @@ security:
     # - { path: ^/admin, roles: ROLE_ADMIN }
     # - { path: ^/profile, roles: ROLE_USER }
     - { path: ^/login, roles: PUBLIC_ACCESS }
+    - { path: ^/webauthn/login, roles: PUBLIC_ACCESS }
     - { path: ^/token/refresh, roles: PUBLIC_ACCESS }
     - { path: ^/register/, roles: PUBLIC_ACCESS }
     - { path: ^/, roles: IS_AUTHENTICATED_FULLY }

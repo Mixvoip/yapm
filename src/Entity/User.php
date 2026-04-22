@@ -58,11 +58,15 @@ class User extends BaseEntity implements PasswordAuthenticatedUserInterface, JWT
     #[ORM\OneToMany(targetEntity: GroupsUser::class, mappedBy: 'user', cascade: ["remove"])]
     private Collection $groupUsers;
 
+    #[ORM\OneToMany(targetEntity: WebAuthnCredential::class, mappedBy: 'user', cascade: ["remove"])]
+    private Collection $webAuthnCredentials;
+
     public function __construct()
     {
         parent::__construct();
         $this->id = Uuid::v4()->toRfc4122();
         $this->groupUsers = new ArrayCollection();
+        $this->webAuthnCredentials = new ArrayCollection();
     }
 
     /**
@@ -321,6 +325,22 @@ class User extends BaseEntity implements PasswordAuthenticatedUserInterface, JWT
     public function getGroupUsers(): Collection
     {
         return $this->groupUsers;
+    }
+
+    /**
+     * @return Collection<int, WebAuthnCredential>
+     */
+    public function getWebAuthnCredentials(): Collection
+    {
+        return $this->webAuthnCredentials;
+    }
+
+    /**
+     * @return bool
+     */
+    public function hasWebAuthnCredentials(): bool
+    {
+        return !$this->webAuthnCredentials->isEmpty();
     }
 
     /**

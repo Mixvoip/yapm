@@ -20,6 +20,7 @@ use App\Entity\User;
 use App\Message\ShareProcessMessage;
 use App\Normalizer\ShareProcessNormalizer;
 use App\Repository\FolderRepository;
+use App\Repository\WebAuthnCredentialRepository;
 use App\Service\Audit\AuditService;
 use App\Service\Encryption\EncryptionService;
 use Doctrine\ORM\EntityManagerInterface;
@@ -48,6 +49,7 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
      * @param  EncryptionService  $encryptionService
      * @param  MessageBusInterface  $bus
      * @param  Request  $request
+     * @param  WebAuthnCredentialRepository  $webAuthnCredentialRepository
      *
      * @return JsonResponse
      * @throws ExceptionInterface
@@ -65,13 +67,15 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
         UserPasswordHasherInterface $passwordHasher,
         EncryptionService $encryptionService,
         MessageBusInterface $bus,
-        Request $request
+        Request $request,
+        WebAuthnCredentialRepository $webAuthnCredentialRepository
     ): JsonResponse {
         /** @var User $loggedInUser */
         $loggedInUser = $this->getUser();
         $groupIds = $loggedInUser->getGroupIds();
         $this->passwordHasher = $passwordHasher;
         $this->encryptionService = $encryptionService;
+        $this->webAuthnCredentialRepository = $webAuthnCredentialRepository;
 
         /** @var FolderRepository $folderRepository */
         $folderRepository = $entityManager->getRepository(Folder::class);
@@ -113,7 +117,7 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
         $this->assertAtLeastOneWriteAccess($requested, $requestedUserPerms);
 
         try {
-            $this->decryptUserPrivateKey($dto->encryptedPassword);
+            $this->decryptUserPrivateKeyFromAuth($dto->authData);
         } catch (Exception $e) {
             return $this->json(
                 [
@@ -200,7 +204,7 @@ class PatchPermissionsController extends AbstractPatchPermissionsController
         );
         $entityManager->persist($process);
         $entityManager->flush();
-        $bus->dispatch(new ShareProcessMessage($process->getId(), $dto->encryptedPassword, $clientIp, $userAgent));
+        $bus->dispatch(new ShareProcessMessage($process->getId(), $dto->authData, $clientIp, $userAgent));
 
         return $this->json($process, Response::HTTP_ACCEPTED, context: [ShareProcessNormalizer::MINIMISED]);
     }

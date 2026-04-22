@@ -16,4 +16,5 @@ enum AuditAction: string
     case SuccessfulLogin = "successful_login";
     case FailedLogin = "failed_login";
     case RefreshedToken = "refreshed_token";
+    case PasskeyLogin = "passkey_login";
 }

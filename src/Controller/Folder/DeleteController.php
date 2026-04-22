@@ -7,12 +7,13 @@
 
 namespace App\Controller\Folder;
 
-use App\Controller\Dto\EncryptedClientDataDto;
+use App\Controller\Dto\AuthenticationDataDto;
 use App\Controller\EncryptionAwareTrait;
 use App\Entity\Folder;
 use App\Entity\User;
 use App\Message\ProcessDeletionAuditMessage;
 use App\Repository\FolderRepository;
+use App\Repository\WebAuthnCredentialRepository;
 use App\Service\Audit\AuditService;
 use App\Service\Encryption\EncryptionService;
 use DateTimeImmutable;
@@ -38,11 +39,12 @@ class DeleteController extends AbstractController
      *
      * @param  string  $id
      * @param  EntityManagerInterface  $entityManager
-     * @param  EncryptedClientDataDto  $encryptedPassword
+     * @param  AuthenticationDataDto  $authData
      * @param  UserPasswordHasherInterface  $passwordHasher
      * @param  EncryptionService  $encryptionService
      * @param  MessageBusInterface  $bus
      * @param  Request  $request
+     * @param  WebAuthnCredentialRepository  $webAuthnCredentialRepository
      *
      * @return Response
      * @throws DBALException
@@ -57,20 +59,22 @@ class DeleteController extends AbstractController
     public function index(
         string $id,
         EntityManagerInterface $entityManager,
-        #[MapRequestPayload] EncryptedClientDataDto $encryptedPassword,
+        #[MapRequestPayload] AuthenticationDataDto $authData,
         UserPasswordHasherInterface $passwordHasher,
         EncryptionService $encryptionService,
         MessageBusInterface $bus,
-        Request $request
+        Request $request,
+        WebAuthnCredentialRepository $webAuthnCredentialRepository
     ): Response {
         /** @var User $loggedInUser */
         $loggedInUser = $this->getUser();
 
         $this->passwordHasher = $passwordHasher;
         $this->encryptionService = $encryptionService;
+        $this->webAuthnCredentialRepository = $webAuthnCredentialRepository;
 
         try {
-            $this->decryptUserPrivateKey($encryptedPassword);
+            $this->decryptUserPrivateKeyFromAuth($authData);
         } catch (Exception $e) {
             return $this->json(
                 [
